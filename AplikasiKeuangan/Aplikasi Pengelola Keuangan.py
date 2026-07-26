@@ -949,19 +949,15 @@ with st.sidebar:
     )
     menu = st.radio(
         "Menu",
-        ["Dashboard", "Tambah Transaksi", "Data Transaksi", "Kategori", "Panduan"],
+        ["Dashboard", "Tambah Transaksi", "Data Transaksi", "Kategori"],
         format_func=lambda item: {
             "Dashboard": "Dashboard  |  Visualisasi",
             "Tambah Transaksi": "Input Data  |  Simpan",
             "Data Transaksi": "Transaksi  |  Edit & hapus",
             "Kategori": "Kategori  |  Ringkasan",
-            "Panduan": "Panduan  |  Setup",
         }[item],
         label_visibility="collapsed",
     )
-    if st.button("Muat ulang data", use_container_width=True):
-        refresh_spreadsheet_cache()
-        st.toast("Data spreadsheet dimuat ulang.")
 
 
 if not service_account_info or not spreadsheet_id:
@@ -981,32 +977,7 @@ except Exception as exc:
 
 show_action_popup()
 
-with st.sidebar:
-    total_pemasukan_sidebar = df_semua.loc[df_semua["jenis"] == "Pemasukan", "jumlah"].sum() if not df_semua.empty else 0
-    total_pengeluaran_sidebar = df_semua.loc[df_semua["jenis"] == "Pengeluaran", "jumlah"].sum() if not df_semua.empty else 0
-    saldo_sidebar = total_pemasukan_sidebar - total_pengeluaran_sidebar
-    st.markdown(
-        f"""
-        <div class="sidebar-pill-row">
-            <div class="sidebar-pill">
-                <div class="sidebar-pill-label">Saldo</div>
-                <div class="sidebar-pill-value">{rupiah(saldo_sidebar)}</div>
-            </div>
-            <div class="sidebar-pill">
-                <div class="sidebar-pill-label">Transaksi</div>
-                <div class="sidebar-pill-value">{len(df_semua)}</div>
-            </div>
-        </div>
-        <div class="sidebar-summary">
-            <div class="sidebar-summary-label">Kategori aktif</div>
-            <div class="sidebar-summary-value">{df_semua["kategori"].nunique()}</div>
-            <div class="sidebar-summary-note">Data tersinkron dari sheet Transaksi</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-if df_semua.empty and menu not in ["Panduan", "Tambah Transaksi", "Kategori"]:
+if df_semua.empty and menu not in ["Tambah Transaksi", "Kategori"]:
     render_header(APP_TITLE, "Spreadsheet sudah terhubung, tetapi belum ada transaksi valid.")
     st.warning("Sheet Transaksi belum memiliki baris transaksi yang valid.")
     st.markdown(
