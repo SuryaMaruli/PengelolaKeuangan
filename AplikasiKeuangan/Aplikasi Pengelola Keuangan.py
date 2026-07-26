@@ -884,13 +884,12 @@ with st.sidebar:
 
     menu = st.radio(
         "Menu",
-        ["Dashboard", "Tambah Transaksi", "Data Transaksi", "Kategori", "Panduan"],
+        ["Dashboard", "Tambah Transaksi", "Data Transaksi", "Kategori"],
         format_func=lambda item: {
             "Dashboard": "Dashboard  |  Visualisasi",
             "Tambah Transaksi": "Input Data  |  Simpan ke sheet",
             "Data Transaksi": "Transaksi  |  Tabel data",
             "Kategori": "Kategori  |  Dari transaksi",
-            "Panduan": "Panduan  |  Setup",
         }[item],
         label_visibility="collapsed",
     )
@@ -911,7 +910,7 @@ except Exception as exc:
     st.info("Periksa Secrets gcp_service_account, spreadsheet.id, nama sheet, dan pastikan spreadsheet sudah di-share ke client_email service account sebagai Editor.")
     st.stop()
 
-if df_semua.empty and menu not in ["Panduan", "Tambah Transaksi", "Kategori"]:
+if df_semua.empty and menu not in ["Tambah Transaksi", "Kategori"]:
     render_header(APP_TITLE, "Spreadsheet sudah terhubung, tetapi belum ada transaksi valid.")
     st.warning("Sheet Transaksi belum memiliki baris transaksi yang valid.")
     st.markdown(
