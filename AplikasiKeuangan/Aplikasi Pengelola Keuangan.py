@@ -568,7 +568,7 @@ def show_saved_transaction_message():
     if transaction_id:
         render_action_popup(
             "Input berhasil",
-            f"Transaksi {transaction_id} sudah tersimpan dan data terbaru sudah dibaca ulang.",
+            f"Transaksi {transaction_id} berhasil disimpan.",
             "success",
         )
 
@@ -664,7 +664,7 @@ def tampilkan_kartu_ringkasan(df):
     with col3:
         metric_card("Saldo Bersih", rupiah(saldo), "Pemasukan dikurangi pengeluaran")
     with col4:
-        metric_card("Jumlah Transaksi", str(len(df)), "Baris valid dari spreadsheet")
+        metric_card("Jumlah Transaksi", str(len(df)), "Transaksi pada filter aktif")
 
     if saldo < 0:
         st.markdown('<div class="status-negative">Pengeluaran lebih besar daripada pemasukan.</div>', unsafe_allow_html=True)
@@ -939,14 +939,14 @@ def pesan_perubahan_bulanan(rekap):
 
 
 def show_setup_help():
-    render_header(APP_TITLE, "Hubungkan dashboard dengan Google Spreadsheet melalui Service Account.")
-    st.info("Aplikasi membaca Google Spreadsheet memakai Service Account dari Streamlit Secrets.")
+    render_header(APP_TITLE, "Konfigurasi aplikasi belum lengkap.")
+    st.info("Lengkapi konfigurasi aplikasi terlebih dahulu.")
     st.markdown(
         """
         <div class="section-card">
-            <div class="section-title">Format Spreadsheet</div>
-            <div class="section-subtitle">Pastikan spreadsheet sudah dibagikan ke email service account pada field client_email.</div>
-            <b>Sheet Transaksi</b>
+            <div class="section-title">Format Data</div>
+            <div class="section-subtitle">Pastikan konfigurasi penyimpanan sudah aktif.</div>
+            <b>Kolom Transaksi</b>
             <p>id, tanggal, jenis, kategori, keterangan, jumlah, dibuat_pada, diubah_pada</p>
 
         </div>
@@ -963,7 +963,7 @@ with st.sidebar:
         """
         <div class="sidebar-brand">
             <div class="sidebar-brand-title">Monitoring Keuangan</div>
-            <div class="sidebar-brand-subtitle">Pencatatan arus kas harian yang tersimpan langsung di spreadsheet.</div>
+            <div class="sidebar-brand-subtitle">Pencatatan arus kas harian yang mudah dipantau.</div>
         </div>
         <div class="sidebar-section-label">Navigasi</div>
         """,
@@ -987,54 +987,25 @@ if not service_account_info or not spreadsheet_id:
     st.stop()
 
 try:
-    with st.spinner("Mengambil data dari Google Spreadsheet..."):
+    with st.spinner("Mengambil data transaksi..."):
         session = create_authorized_session(service_account_info)
         spreadsheet_refresh_key = st.session_state.get("spreadsheet_refresh_key", 0)
         df_semua = load_spreadsheet(spreadsheet_id, session, spreadsheet_refresh_key)
 except Exception as exc:
-    render_header(APP_TITLE, "Data belum bisa dimuat dari Google Spreadsheet.")
-    st.error(f"Gagal membaca spreadsheet: {exc}")
-    st.info("Periksa Secrets gcp_service_account, spreadsheet.id, nama sheet, dan pastikan spreadsheet sudah di-share ke client_email service account sebagai Editor.")
+    render_header(APP_TITLE, "Data belum bisa dimuat.")
+    st.error(f"Gagal membaca data: {exc}")
+    st.info("Periksa konfigurasi aplikasi lalu coba lagi.")
     st.stop()
 
 show_action_popup()
 
 if df_semua.empty and menu not in ["Tambah Transaksi", "Kategori"]:
-    render_header(APP_TITLE, "Spreadsheet sudah terhubung, tetapi belum ada transaksi valid.")
-    st.warning("Sheet Transaksi belum memiliki baris transaksi yang valid.")
-    st.markdown(
-        """
-        <div class="section-card">
-            <div class="section-title">Cek Sheet Transaksi</div>
-            <div class="section-subtitle">Header boleh huruf besar/kecil, tetapi isi data wajib valid.</div>
-            <p><b>jenis</b> harus berisi Pemasukan atau Pengeluaran.</p>
-            <p><b>tanggal</b> bisa memakai format 26/07/2026, 26-07-2026, atau 2026-07-26.</p>
-            <p><b>jumlah</b> harus angka, misalnya 50000 atau Rp 50.000.</p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-    contoh = pd.DataFrame(
-        [
-            {
-                "id": "1",
-                "tanggal": "26/07/2026",
-                "jenis": "Pengeluaran",
-                "kategori": "Makan / Jajan",
-                "keterangan": "Makan siang",
-                "jumlah": "25000",
-                "dibuat_pada": "26/07/2026",
-                "diubah_pada": "26/07/2026",
-            }
-        ]
-    )
-    st.caption("Contoh baris yang valid untuk sheet Transaksi")
-    st.dataframe(contoh, use_container_width=True, hide_index=True)
-
+    render_header(APP_TITLE, "Belum ada transaksi yang dimasukkan.")
+    st.info("Belum ada transaksi yang dimasukkan.")
     st.stop()
 
 if menu == "Tambah Transaksi":
-    render_header("Tambah Transaksi", "Isi detail transaksi, periksa kategorinya, lalu simpan ke sheet Transaksi.")
+    render_header("Tambah Transaksi", "Isi detail transaksi, periksa kategorinya, lalu simpan data.")
     show_saved_transaction_message()
     st.markdown(
         """
@@ -1073,11 +1044,11 @@ if menu == "Tambah Transaksi":
             mark_transaction_saved(transaction_id)
             st.rerun()
         except Exception as exc:
-            render_action_popup("Input gagal", "Transaksi belum tersimpan. Periksa koneksi spreadsheet lalu coba lagi.", "danger")
+            render_action_popup("Input gagal", "Transaksi belum tersimpan. Periksa koneksi lalu coba lagi.", "danger")
             st.error(f"Gagal menyimpan transaksi: {exc}")
 
 elif menu == "Dashboard":
-    render_header(APP_TITLE, "Pantau transaksi dari Google Spreadsheet dalam visualisasi interaktif.")
+    render_header(APP_TITLE, "Pantau transaksi dalam visualisasi interaktif.")
     df_filter = filter_data(df_semua)
     if df_filter.empty:
         st.warning("Tidak ada transaksi yang sesuai dengan filter.")
@@ -1117,9 +1088,9 @@ elif menu == "Dashboard":
         )
 
 elif menu == "Data Transaksi":
-    render_header("Kelola Data", "Lihat, edit, atau hapus transaksi yang sudah tersimpan di sheet Transaksi.")
+    render_header("Kelola Data", "Lihat, edit, atau hapus transaksi yang sudah tersimpan.")
     if df_semua.empty:
-        st.info("Belum ada transaksi yang bisa diedit atau dihapus.")
+        st.info("Belum ada transaksi yang dimasukkan.")
     else:
         tampil = df_semua.drop(columns=[SHEET_ROW_COLUMN], errors="ignore").copy()
         tampil["tanggal"] = tampil["tanggal"].dt.strftime("%d-%m-%Y")
@@ -1159,7 +1130,7 @@ elif menu == "Data Transaksi":
                 key="edit_transaction_select",
             )
             selected = df_semua.iloc[pilihan_index]
-            st.caption(f"ID terpilih: {selected['id']} | Baris sheet: {int(selected[SHEET_ROW_COLUMN])}")
+            st.caption(f"ID terpilih: {selected['id']}")
 
             with st.form("form_edit_transaksi"):
                 edit_jenis = st.radio(
@@ -1207,10 +1178,10 @@ elif menu == "Data Transaksi":
                         edit_jumlah,
                         selected["dibuat_pada"],
                     )
-                    mark_action_popup("Edit berhasil", f"Transaksi {selected['id']} sudah diperbarui di spreadsheet.", "success")
+                    mark_action_popup("Edit berhasil", f"Transaksi {selected['id']} berhasil diperbarui.", "success")
                     st.rerun()
                 except Exception as exc:
-                    render_action_popup("Edit gagal", "Perubahan belum tersimpan. Periksa koneksi spreadsheet lalu coba lagi.", "danger")
+                    render_action_popup("Edit gagal", "Perubahan belum tersimpan. Periksa koneksi lalu coba lagi.", "danger")
                     st.error(f"Gagal mengedit transaksi: {exc}")
 
         with tab_hapus:
@@ -1218,7 +1189,7 @@ elif menu == "Data Transaksi":
                 """
                 <div class="action-panel">
                     <div class="action-panel-title">Hapus transaksi</div>
-                    <div class="action-panel-note">Pilih transaksi yang ingin dihapus. Aplikasi akan meminta konfirmasi sebelum menghapus baris dari spreadsheet.</div>
+                    <div class="action-panel-note">Pilih transaksi yang ingin dihapus. Aplikasi akan meminta konfirmasi sebelum data dihapus.</div>
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -1255,17 +1226,17 @@ elif menu == "Data Transaksi":
                         """,
                         unsafe_allow_html=True,
                     )
-                    st.warning("Data akan dihapus permanen dari sheet Transaksi.")
+                    st.warning("Data akan dihapus permanen.")
                     col_hapus, col_batal = st.columns(2)
                     with col_hapus:
                         if st.button("Ya, Hapus", type="primary", use_container_width=True):
                             try:
                                 delete_transaksi(spreadsheet_id, session, delete_row[SHEET_ROW_COLUMN])
                                 st.session_state.pop("delete_transaction_id", None)
-                                mark_action_popup("Hapus berhasil", f"Transaksi {delete_row['id']} sudah dihapus dari spreadsheet.", "success")
+                                mark_action_popup("Hapus berhasil", f"Transaksi {delete_row['id']} berhasil dihapus.", "success")
                                 st.rerun()
                             except Exception as exc:
-                                render_action_popup("Hapus gagal", "Transaksi belum terhapus. Periksa koneksi spreadsheet lalu coba lagi.", "danger")
+                                render_action_popup("Hapus gagal", "Transaksi belum terhapus. Periksa koneksi lalu coba lagi.", "danger")
                                 st.error(f"Gagal menghapus transaksi: {exc}")
                     with col_batal:
                         if st.button("Batal", use_container_width=True):
@@ -1276,9 +1247,9 @@ elif menu == "Data Transaksi":
                 confirm_delete_dialog()
 
 elif menu == "Kategori":
-    render_header("Kategori", "Daftar kategori dibaca dari kolom kategori pada sheet Transaksi.")
+    render_header("Kategori", "Ringkasan kategori dari transaksi yang tersimpan.")
     if df_semua.empty:
-        st.info("Belum ada kategori karena sheet Transaksi belum memiliki transaksi valid.")
+        st.info("Belum ada transaksi yang dimasukkan.")
     else:
         kategori_rekap = (
             df_semua.groupby(["jenis", "kategori"], as_index=False)
