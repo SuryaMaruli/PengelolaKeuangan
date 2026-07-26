@@ -864,7 +864,6 @@ with st.sidebar:
         """
         <div class="sidebar-brand">
             <div class="sidebar-brand-title">Monitoring Keuangan</div>
-            <div class="sidebar-brand-subtitle">Data langsung dari Google Spreadsheet.</div>
         </div>
         <div class="sidebar-section-label">Koneksi Spreadsheet</div>
         """,
