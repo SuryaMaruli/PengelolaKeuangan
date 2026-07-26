@@ -122,7 +122,7 @@ st.markdown(
     <style>
         .stApp { background: linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%); }
         .block-container { padding-top: 1.3rem; max-width: 1450px; }
-        [data-testid="stSidebar"] { background: linear-gradient(180deg, #0f172a 0%, #1e293b 100%); }
+        [data-testid="stSidebar"] { background: linear-gradient(180deg, #111827 0%, #1f2937 58%, #0f172a 100%); border-right: 1px solid rgba(148,163,184,.18); }
         [data-testid="stSidebar"] * { color: #f8fafc; }
         .hero-card {
             background: linear-gradient(135deg, #2563eb 0%, #06b6d4 55%, #22c55e 100%);
@@ -530,33 +530,55 @@ def mark_transaction_saved(transaction_id):
 
 
 
-def mark_action_popup(message):
-    st.session_state["action_popup"] = message
+def render_action_popup(title, message="", tone="success"):
+    st.toast(title)
+    st.markdown(
+        f"""
+        <div class="action-popup {tone}">
+            <div class="action-popup-title">{title}</div>
+            <div class="action-popup-message">{message}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def mark_action_popup(title, message="", tone="success"):
+    st.session_state["action_popup"] = {
+        "title": title,
+        "message": message,
+        "tone": tone,
+    }
 
 
 def show_action_popup():
     popup = st.session_state.pop("action_popup", None)
-    if popup:
-        st.toast(popup)
+    if not popup:
+        return
+
+    render_action_popup(
+        popup.get("title", "Aksi berhasil"),
+        popup.get("message", "Data sudah diperbarui."),
+        popup.get("tone", "success"),
+    )
 
 
 def show_saved_transaction_message():
     transaction_id = st.session_state.pop("last_saved_transaction_id", None)
     if transaction_id:
-        st.success(
-            "Transaksi berhasil disimpan ke spreadsheet dan data terbaru "
-            f"sudah dibaca ulang dengan ID {transaction_id}."
+        render_action_popup(
+            "Input berhasil",
+            f"Transaksi {transaction_id} sudah tersimpan dan data terbaru sudah dibaca ulang.",
+            "success",
         )
-
-        st.toast("Transaksi berhasil disimpan.")
-
-
 
 def refresh_spreadsheet_cache():
     st.cache_data.clear()
     st.session_state["spreadsheet_refresh_key"] = (
         st.session_state.get("spreadsheet_refresh_key", 0) + 1
     )
+
+
 def filter_data(df):
     if df.empty:
         return df
@@ -941,7 +963,7 @@ with st.sidebar:
         """
         <div class="sidebar-brand">
             <div class="sidebar-brand-title">Monitoring Keuangan</div>
-            <div class="sidebar-brand-subtitle">Kelola pemasukan, pengeluaran, edit, dan hapus data langsung dari spreadsheet.</div>
+            <div class="sidebar-brand-subtitle">Pencatatan arus kas harian yang tersimpan langsung di spreadsheet.</div>
         </div>
         <div class="sidebar-section-label">Navigasi</div>
         """,
@@ -951,10 +973,10 @@ with st.sidebar:
         "Menu",
         ["Dashboard", "Tambah Transaksi", "Data Transaksi", "Kategori"],
         format_func=lambda item: {
-            "Dashboard": "Dashboard  |  Visualisasi",
-            "Tambah Transaksi": "Input Data  |  Simpan",
-            "Data Transaksi": "Transaksi  |  Edit & hapus",
-            "Kategori": "Kategori  |  Ringkasan",
+            "Dashboard": "Dashboard Keuangan",
+            "Tambah Transaksi": "Tambah Transaksi",
+            "Data Transaksi": "Kelola Data",
+            "Kategori": "Ringkasan Kategori",
         }[item],
         label_visibility="collapsed",
     )
@@ -1012,8 +1034,17 @@ if df_semua.empty and menu not in ["Tambah Transaksi", "Kategori"]:
     st.stop()
 
 if menu == "Tambah Transaksi":
-    render_header("Tambah Transaksi", "Input transaksi dari Streamlit, simpan ke sheet Transaksi, lalu baca ulang dari spreadsheet.")
+    render_header("Tambah Transaksi", "Isi detail transaksi, periksa kategorinya, lalu simpan ke sheet Transaksi.")
     show_saved_transaction_message()
+    st.markdown(
+        """
+        <div class="action-panel">
+            <div class="action-panel-title">Form input data</div>
+            <div class="action-panel-note">Pilih jenis transaksi terlebih dahulu. Pilihan kategori akan menyesuaikan jenis yang dipilih.</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
     jenis = st.radio("Jenis transaksi", ["Pengeluaran", "Pemasukan"], horizontal=True)
     opsi_kategori = KATEGORI_TRANSAKSI[jenis]
 
@@ -1021,11 +1052,12 @@ if menu == "Tambah Transaksi":
         col1, col2 = st.columns(2)
         with col1:
             tanggal = st.date_input("Tanggal transaksi")
-            kategori = st.selectbox("Kategori", opsi_kategori)
+            kategori = st.selectbox("Kategori", opsi_kategori, help="Kategori tersaring otomatis berdasarkan jenis transaksi.")
         with col2:
             jumlah = st.number_input("Jumlah", min_value=1_000, step=1_000, format="%d")
             keterangan = st.text_input("Keterangan", placeholder="Contoh: makan siang")
-        simpan = st.form_submit_button("Simpan ke Spreadsheet", type="primary", use_container_width=True)
+        st.caption(f"Ringkasan: {jenis} - {kategori} - jumlah minimal Rp 1.000")
+        simpan = st.form_submit_button("Simpan Transaksi", type="primary", use_container_width=True)
 
     if simpan:
         try:
@@ -1041,6 +1073,7 @@ if menu == "Tambah Transaksi":
             mark_transaction_saved(transaction_id)
             st.rerun()
         except Exception as exc:
+            render_action_popup("Input gagal", "Transaksi belum tersimpan. Periksa koneksi spreadsheet lalu coba lagi.", "danger")
             st.error(f"Gagal menyimpan transaksi: {exc}")
 
 elif menu == "Dashboard":
@@ -1084,7 +1117,7 @@ elif menu == "Dashboard":
         )
 
 elif menu == "Data Transaksi":
-    render_header("Data Transaksi", "Tabel dibaca dari sheet Transaksi. Pilih satu baris untuk edit atau hapus.")
+    render_header("Kelola Data", "Lihat, edit, atau hapus transaksi yang sudah tersimpan di sheet Transaksi.")
     if df_semua.empty:
         st.info("Belum ada transaksi yang bisa diedit atau dihapus.")
     else:
@@ -1103,98 +1136,141 @@ elif menu == "Data Transaksi":
             use_container_width=True,
         )
 
-        section_header("Edit / Hapus Transaksi", "Pilih transaksi berdasarkan ID dan keterangan.")
         pilihan_transaksi = df_semua.apply(
-            lambda row: f"{row['id']} | {row['tanggal'].strftime('%d-%m-%Y')} | {row['jenis']} | {row['kategori']} | {rupiah(row['jumlah'])}",
+            lambda row: f"{row['id']} | {row['tanggal'].strftime('%d-%m-%Y')} | {row['jenis']} | {row['kategori']} | {rupiah(row['jumlah'])} | {row['keterangan']}",
             axis=1,
         ).tolist()
-        pilihan_index = st.selectbox("Pilih transaksi", range(len(pilihan_transaksi)), format_func=lambda idx: pilihan_transaksi[idx])
-        selected = df_semua.iloc[pilihan_index]
+        tab_edit, tab_hapus = st.tabs(["Edit Data", "Hapus Data"])
 
-        with st.form("form_edit_transaksi"):
-            edit_jenis = st.radio(
-                "Jenis transaksi",
-                ["Pengeluaran", "Pemasukan"],
-                index=["Pengeluaran", "Pemasukan"].index(selected["jenis"]),
-                horizontal=True,
-                key="edit_jenis",
+        with tab_edit:
+            st.markdown(
+                """
+                <div class="action-panel">
+                    <div class="action-panel-title">Edit transaksi tersimpan</div>
+                    <div class="action-panel-note">Pilih satu transaksi, ubah field yang diperlukan, lalu simpan. ID transaksi dan waktu dibuat tetap dipertahankan.</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
             )
-            edit_opsi_kategori = KATEGORI_TRANSAKSI[edit_jenis].copy()
-            if selected["kategori"] not in edit_opsi_kategori:
-                edit_opsi_kategori.insert(0, selected["kategori"])
-            col1, col2 = st.columns(2)
-            with col1:
-                edit_tanggal = st.date_input("Tanggal transaksi", value=selected["tanggal"].date(), key="edit_tanggal")
-                edit_kategori = st.selectbox(
-                    "Kategori",
-                    edit_opsi_kategori,
-                    index=edit_opsi_kategori.index(selected["kategori"]),
-                    key="edit_kategori",
-                )
-            with col2:
-                edit_jumlah = st.number_input(
-                    "Jumlah",
-                    min_value=1_000,
-                    step=1_000,
-                    value=int(selected["jumlah"]),
-                    format="%d",
-                    key="edit_jumlah",
-                )
-                edit_keterangan = st.text_input("Keterangan", value=selected["keterangan"], key="edit_keterangan")
-            simpan_edit = st.form_submit_button("Simpan Perubahan", type="primary", use_container_width=True)
+            pilihan_index = st.selectbox(
+                "Pilih transaksi untuk diedit",
+                range(len(pilihan_transaksi)),
+                format_func=lambda idx: pilihan_transaksi[idx],
+                key="edit_transaction_select",
+            )
+            selected = df_semua.iloc[pilihan_index]
+            st.caption(f"ID terpilih: {selected['id']} | Baris sheet: {int(selected[SHEET_ROW_COLUMN])}")
 
-        if simpan_edit:
-            try:
-                update_transaksi(
-                    spreadsheet_id,
-                    session,
-                    selected[SHEET_ROW_COLUMN],
-                    selected["id"],
-                    edit_tanggal,
-                    edit_jenis,
-                    edit_kategori,
-                    edit_keterangan,
-                    edit_jumlah,
-                    selected["dibuat_pada"],
+            with st.form("form_edit_transaksi"):
+                edit_jenis = st.radio(
+                    "Jenis transaksi",
+                    ["Pengeluaran", "Pemasukan"],
+                    index=["Pengeluaran", "Pemasukan"].index(selected["jenis"]),
+                    horizontal=True,
+                    key="edit_jenis",
                 )
-                mark_action_popup("Transaksi berhasil diedit.")
+                edit_opsi_kategori = KATEGORI_TRANSAKSI[edit_jenis].copy()
+                if selected["kategori"] not in edit_opsi_kategori:
+                    edit_opsi_kategori.insert(0, selected["kategori"])
+                col1, col2 = st.columns(2)
+                with col1:
+                    edit_tanggal = st.date_input("Tanggal transaksi", value=selected["tanggal"].date(), key="edit_tanggal")
+                    edit_kategori = st.selectbox(
+                        "Kategori",
+                        edit_opsi_kategori,
+                        index=edit_opsi_kategori.index(selected["kategori"]),
+                        key="edit_kategori",
+                    )
+                with col2:
+                    edit_jumlah = st.number_input(
+                        "Jumlah",
+                        min_value=1_000,
+                        step=1_000,
+                        value=int(selected["jumlah"]),
+                        format="%d",
+                        key="edit_jumlah",
+                    )
+                    edit_keterangan = st.text_input("Keterangan", value=selected["keterangan"], key="edit_keterangan")
+                simpan_edit = st.form_submit_button("Simpan Perubahan", type="primary", use_container_width=True)
+
+            if simpan_edit:
+                try:
+                    update_transaksi(
+                        spreadsheet_id,
+                        session,
+                        selected[SHEET_ROW_COLUMN],
+                        selected["id"],
+                        edit_tanggal,
+                        edit_jenis,
+                        edit_kategori,
+                        edit_keterangan,
+                        edit_jumlah,
+                        selected["dibuat_pada"],
+                    )
+                    mark_action_popup("Edit berhasil", f"Transaksi {selected['id']} sudah diperbarui di spreadsheet.", "success")
+                    st.rerun()
+                except Exception as exc:
+                    render_action_popup("Edit gagal", "Perubahan belum tersimpan. Periksa koneksi spreadsheet lalu coba lagi.", "danger")
+                    st.error(f"Gagal mengedit transaksi: {exc}")
+
+        with tab_hapus:
+            st.markdown(
+                """
+                <div class="action-panel">
+                    <div class="action-panel-title">Hapus transaksi</div>
+                    <div class="action-panel-note">Pilih transaksi yang ingin dihapus. Aplikasi akan meminta konfirmasi sebelum menghapus baris dari spreadsheet.</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            hapus_index = st.selectbox(
+                "Pilih transaksi untuk dihapus",
+                range(len(pilihan_transaksi)),
+                format_func=lambda idx: pilihan_transaksi[idx],
+                key="delete_transaction_select",
+            )
+            delete_preview = df_semua.iloc[hapus_index]
+            st.warning(f"Transaksi terpilih: {delete_preview['id']} - {delete_preview['kategori']} - {rupiah(delete_preview['jumlah'])}")
+            if st.button("Lanjutkan Hapus", type="secondary", use_container_width=True):
+                st.session_state["delete_transaction_id"] = delete_preview["id"]
                 st.rerun()
-            except Exception as exc:
-                st.toast("Gagal mengedit transaksi.")
-                st.error(f"Gagal mengedit transaksi: {exc}")
-
-        if st.button("Hapus Transaksi", type="secondary", use_container_width=True):
-            st.session_state["delete_transaction_id"] = selected["id"]
-            st.rerun()
 
         if st.session_state.get("delete_transaction_id"):
             delete_id = st.session_state["delete_transaction_id"]
             delete_match = df_semua[df_semua["id"] == delete_id]
             if delete_match.empty:
                 st.session_state.pop("delete_transaction_id", None)
-                st.toast("Transaksi yang dipilih tidak ditemukan.")
+                render_action_popup("Hapus gagal", "Transaksi yang dipilih tidak ditemukan.", "warning")
             else:
                 delete_row = delete_match.iloc[0]
 
-                @st.dialog("Konfirmasi Hapus")
+                @st.dialog("Konfirmasi Hapus Transaksi")
                 def confirm_delete_dialog():
-                    st.write(f"Hapus transaksi {delete_row['id']} senilai {rupiah(delete_row['jumlah'])}?")
-                    st.caption("Data akan dihapus dari sheet Transaksi.")
+                    st.markdown(
+                        f"""
+                        <div class="action-panel">
+                            <div class="action-panel-title">{delete_row['id']}</div>
+                            <div class="action-panel-note">{delete_row['tanggal'].strftime('%d-%m-%Y')} - {delete_row['jenis']} - {delete_row['kategori']} - {rupiah(delete_row['jumlah'])}</div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+                    st.warning("Data akan dihapus permanen dari sheet Transaksi.")
                     col_hapus, col_batal = st.columns(2)
                     with col_hapus:
-                        if st.button("Hapus", type="primary", use_container_width=True):
+                        if st.button("Ya, Hapus", type="primary", use_container_width=True):
                             try:
                                 delete_transaksi(spreadsheet_id, session, delete_row[SHEET_ROW_COLUMN])
                                 st.session_state.pop("delete_transaction_id", None)
-                                mark_action_popup("Transaksi berhasil dihapus.")
+                                mark_action_popup("Hapus berhasil", f"Transaksi {delete_row['id']} sudah dihapus dari spreadsheet.", "success")
                                 st.rerun()
                             except Exception as exc:
-                                st.toast("Gagal menghapus transaksi.")
+                                render_action_popup("Hapus gagal", "Transaksi belum terhapus. Periksa koneksi spreadsheet lalu coba lagi.", "danger")
                                 st.error(f"Gagal menghapus transaksi: {exc}")
                     with col_batal:
                         if st.button("Batal", use_container_width=True):
                             st.session_state.pop("delete_transaction_id", None)
-                            st.toast("Hapus transaksi dibatalkan.")
+                            mark_action_popup("Hapus dibatalkan", "Tidak ada data yang dihapus.", "info")
                             st.rerun()
 
                 confirm_delete_dialog()
