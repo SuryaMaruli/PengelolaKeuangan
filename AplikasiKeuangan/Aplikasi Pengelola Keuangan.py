@@ -19,6 +19,7 @@ st.set_page_config(
 APP_TITLE = "Monitoring Keuangan"
 TRANSAKSI_RANGE = "Transaksi!A:H"
 TRANSAKSI_HEADER_RANGE = "Transaksi!A1:H1"
+SHEET_ROW_COLUMN = "_sheet_row"
 TRANSAKSI_COLUMNS = [
     "id",
     "tanggal",
@@ -172,7 +173,16 @@ st.markdown(
             margin-bottom: 1rem;
         }
         .sidebar-brand-title { font-size: 1.3rem; font-weight: 900; color: white; }
-        .sidebar-brand-subtitle { font-size: .82rem; color: rgba(255,255,255,.86); margin-top: .35rem; }
+        .sidebar-brand-subtitle { font-size: .82rem; color: rgba(255,255,255,.86); margin-top: .35rem; line-height: 1.35; }
+        .sidebar-pill-row { display: grid; grid-template-columns: 1fr 1fr; gap: .55rem; margin: .8rem 0 1rem; }
+        .sidebar-pill {
+            padding: .75rem .7rem;
+            border-radius: 14px;
+            background: rgba(255,255,255,.08);
+            border: 1px solid rgba(255,255,255,.12);
+        }
+        .sidebar-pill-label { font-size: .72rem; color: #cbd5e1; font-weight: 800; }
+        .sidebar-pill-value { font-size: 1.05rem; color: #fff; font-weight: 900; margin-top: .18rem; }
         .sidebar-section-label {
             font-size: .72rem;
             font-weight: 900;
@@ -304,7 +314,10 @@ def create_authorized_session(service_account_info):
 
 
 def sheets_api_url(spreadsheet_id, path):
-    return f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}/{path}"
+    base_url = f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}"
+    if path.startswith(("?", ":")):
+        return f"{base_url}{path}"
+    return f"{base_url}/{path}"
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -348,14 +361,16 @@ def normalize_header(header):
 
 def values_to_df(values, expected_headers):
     if not values:
-        return pd.DataFrame(columns=expected_headers)
+        return pd.DataFrame(columns=expected_headers + [SHEET_ROW_COLUMN])
 
     headers = [normalize_header(item) for item in values[0]]
     rows = values[1:]
     width = max(len(headers), len(expected_headers))
     headers = (headers + expected_headers)[:width]
     normalized = [row + [""] * (width - len(row)) for row in rows]
-    return pd.DataFrame(normalized, columns=headers)
+    df = pd.DataFrame(normalized, columns=headers)
+    df[SHEET_ROW_COLUMN] = range(2, len(df) + 2)
+    return df
 
 
 def normalize_jenis(nilai):
@@ -413,6 +428,7 @@ def prepare_transaksi(df):
             df[column] = ""
 
     clean = df[TRANSAKSI_COLUMNS].copy()
+    clean[SHEET_ROW_COLUMN] = df.get(SHEET_ROW_COLUMN, pd.Series(index=df.index, dtype="Int64"))
     clean["jenis"] = clean["jenis"].map(normalize_jenis)
     clean["kategori"] = clean["kategori"].astype(str).str.strip()
     clean["keterangan"] = clean["keterangan"].astype(str).str.strip()
@@ -435,20 +451,26 @@ def load_spreadsheet(spreadsheet_id, session, refresh_key=0):
     return prepare_transaksi(transaksi)
 
 
-def append_transaksi(spreadsheet_id, session, tanggal, jenis, kategori, keterangan, jumlah):
+def build_transaction_row(transaction_id, tanggal, jenis, kategori, keterangan, jumlah, dibuat_pada=None):
     timestamp = pd.Timestamp.now(tz="Asia/Jakarta")
     now = timestamp.strftime("%Y-%m-%d %H:%M:%S")
-    transaction_id = f"TRX-{timestamp.strftime('%Y%m%d%H%M%S%f')}"
-    row = [
+    created_at = dibuat_pada.strftime("%Y-%m-%d %H:%M:%S") if pd.notna(dibuat_pada) else now
+    return [
         transaction_id,
         tanggal.strftime("%Y-%m-%d"),
         jenis,
         kategori.strip(),
         keterangan.strip(),
         int(jumlah),
-        now,
+        created_at,
         now,
     ]
+
+
+def append_transaksi(spreadsheet_id, session, tanggal, jenis, kategori, keterangan, jumlah):
+    timestamp = pd.Timestamp.now(tz="Asia/Jakarta")
+    transaction_id = f"TRX-{timestamp.strftime('%Y%m%d%H%M%S%f')}"
+    row = build_transaction_row(transaction_id, tanggal, jenis, kategori, keterangan, jumlah)
     ensure_transaksi_header(spreadsheet_id, session)
     url = (
         sheets_api_url(spreadsheet_id, f"values/{quote(TRANSAKSI_RANGE)}:append")
@@ -463,8 +485,59 @@ def append_transaksi(spreadsheet_id, session, tanggal, jenis, kategori, keterang
     return transaction_id
 
 
+def update_transaksi(spreadsheet_id, session, sheet_row, transaction_id, tanggal, jenis, kategori, keterangan, jumlah, dibuat_pada):
+    row = build_transaction_row(transaction_id, tanggal, jenis, kategori, keterangan, jumlah, dibuat_pada)
+    update_values(spreadsheet_id, f"Transaksi!A{int(sheet_row)}:H{int(sheet_row)}", session, [row])
+    refresh_spreadsheet_cache()
+
+
+def get_sheet_id(spreadsheet_id, session, sheet_title="Transaksi"):
+    response = session.get(sheets_api_url(spreadsheet_id, "?fields=sheets.properties"), timeout=20)
+    if not response.ok:
+        raise RuntimeError(f"Google Sheets API error {response.status_code}: {response.text}")
+    for sheet in response.json().get("sheets", []):
+        properties = sheet.get("properties", {})
+        if properties.get("title") == sheet_title:
+            return properties.get("sheetId")
+    raise RuntimeError(f"Sheet {sheet_title} tidak ditemukan.")
+
+
+def delete_transaksi(spreadsheet_id, session, sheet_row):
+    sheet_id = get_sheet_id(spreadsheet_id, session)
+    body = {
+        "requests": [
+            {
+                "deleteDimension": {
+                    "range": {
+                        "sheetId": sheet_id,
+                        "dimension": "ROWS",
+                        "startIndex": int(sheet_row) - 1,
+                        "endIndex": int(sheet_row),
+                    }
+                }
+            }
+        ]
+    }
+    response = session.post(sheets_api_url(spreadsheet_id, ":batchUpdate"), json=body, timeout=20)
+    if not response.ok:
+        raise RuntimeError(f"Google Sheets API error {response.status_code}: {response.text}")
+    refresh_spreadsheet_cache()
+
+
 def mark_transaction_saved(transaction_id):
     st.session_state["last_saved_transaction_id"] = transaction_id
+
+
+
+
+def mark_action_popup(message):
+    st.session_state["action_popup"] = message
+
+
+def show_action_popup():
+    popup = st.session_state.pop("action_popup", None)
+    if popup:
+        st.toast(popup)
 
 
 def show_saved_transaction_message():
@@ -475,6 +548,7 @@ def show_saved_transaction_message():
             f"sudah dibaca ulang dengan ID {transaction_id}."
         )
 
+        st.toast("Transaksi berhasil disimpan.")
 
 
 
@@ -859,40 +933,35 @@ def show_setup_help():
     )
 
 
+service_account_info = get_service_account_info()
+spreadsheet_id = extract_spreadsheet_id(get_spreadsheet_id(""))
+
 with st.sidebar:
     st.markdown(
         """
         <div class="sidebar-brand">
             <div class="sidebar-brand-title">Monitoring Keuangan</div>
+            <div class="sidebar-brand-subtitle">Kelola pemasukan, pengeluaran, edit, dan hapus data langsung dari spreadsheet.</div>
         </div>
-        <div class="sidebar-section-label">Koneksi Spreadsheet</div>
+        <div class="sidebar-section-label">Navigasi</div>
         """,
         unsafe_allow_html=True,
     )
-    service_account_info = get_service_account_info()
-    default_sheet_id = get_spreadsheet_id("")
-    sheet_input = st.text_input("Spreadsheet ID atau URL", value=default_sheet_id)
-    spreadsheet_id = extract_spreadsheet_id(sheet_input)
-    if service_account_info:
-        st.success("Service account terdeteksi dari Secrets.")
-        st.caption(f"Email service account: {service_account_info.get('client_email', '-')}")
-    else:
-        st.warning("Secrets gcp_service_account belum ditemukan.")
-    st.caption(f"Judul spreadsheet: {APP_TITLE}")
-    if st.button("Muat ulang data", use_container_width=True):
-        refresh_spreadsheet_cache()
-
     menu = st.radio(
         "Menu",
-        ["Dashboard", "Tambah Transaksi", "Data Transaksi", "Kategori"],
+        ["Dashboard", "Tambah Transaksi", "Data Transaksi", "Kategori", "Panduan"],
         format_func=lambda item: {
             "Dashboard": "Dashboard  |  Visualisasi",
-            "Tambah Transaksi": "Input Data  |  Simpan ke sheet",
-            "Data Transaksi": "Transaksi  |  Tabel data",
-            "Kategori": "Kategori  |  Dari transaksi",
+            "Tambah Transaksi": "Input Data  |  Simpan",
+            "Data Transaksi": "Transaksi  |  Edit & hapus",
+            "Kategori": "Kategori  |  Ringkasan",
+            "Panduan": "Panduan  |  Setup",
         }[item],
         label_visibility="collapsed",
     )
+    if st.button("Muat ulang data", use_container_width=True):
+        refresh_spreadsheet_cache()
+        st.toast("Data spreadsheet dimuat ulang.")
 
 
 if not service_account_info or not spreadsheet_id:
@@ -910,7 +979,34 @@ except Exception as exc:
     st.info("Periksa Secrets gcp_service_account, spreadsheet.id, nama sheet, dan pastikan spreadsheet sudah di-share ke client_email service account sebagai Editor.")
     st.stop()
 
-if df_semua.empty and menu not in ["Tambah Transaksi", "Kategori"]:
+show_action_popup()
+
+with st.sidebar:
+    total_pemasukan_sidebar = df_semua.loc[df_semua["jenis"] == "Pemasukan", "jumlah"].sum() if not df_semua.empty else 0
+    total_pengeluaran_sidebar = df_semua.loc[df_semua["jenis"] == "Pengeluaran", "jumlah"].sum() if not df_semua.empty else 0
+    saldo_sidebar = total_pemasukan_sidebar - total_pengeluaran_sidebar
+    st.markdown(
+        f"""
+        <div class="sidebar-pill-row">
+            <div class="sidebar-pill">
+                <div class="sidebar-pill-label">Saldo</div>
+                <div class="sidebar-pill-value">{rupiah(saldo_sidebar)}</div>
+            </div>
+            <div class="sidebar-pill">
+                <div class="sidebar-pill-label">Transaksi</div>
+                <div class="sidebar-pill-value">{len(df_semua)}</div>
+            </div>
+        </div>
+        <div class="sidebar-summary">
+            <div class="sidebar-summary-label">Kategori aktif</div>
+            <div class="sidebar-summary-value">{df_semua["kategori"].nunique()}</div>
+            <div class="sidebar-summary-note">Data tersinkron dari sheet Transaksi</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+if df_semua.empty and menu not in ["Panduan", "Tambah Transaksi", "Kategori"]:
     render_header(APP_TITLE, "Spreadsheet sudah terhubung, tetapi belum ada transaksi valid.")
     st.warning("Sheet Transaksi belum memiliki baris transaksi yang valid.")
     st.markdown(
@@ -1017,18 +1113,120 @@ elif menu == "Dashboard":
         )
 
 elif menu == "Data Transaksi":
-    render_header("Data Transaksi", "Tabel ini dibaca langsung dari sheet Transaksi.")
-    tampil = df_semua.copy()
-    tampil["tanggal"] = tampil["tanggal"].dt.strftime("%d-%m-%Y")
-    tampil["jumlah"] = tampil["jumlah"].map(rupiah)
-    st.dataframe(tampil, use_container_width=True, hide_index=True)
-    st.download_button(
-        "Unduh Data Transaksi",
-        data=df_semua.to_csv(index=False).encode("utf-8-sig"),
-        file_name="transaksi_spreadsheet.csv",
-        mime="text/csv",
-        use_container_width=True,
-    )
+    render_header("Data Transaksi", "Tabel dibaca dari sheet Transaksi. Pilih satu baris untuk edit atau hapus.")
+    if df_semua.empty:
+        st.info("Belum ada transaksi yang bisa diedit atau dihapus.")
+    else:
+        tampil = df_semua.drop(columns=[SHEET_ROW_COLUMN], errors="ignore").copy()
+        tampil["tanggal"] = tampil["tanggal"].dt.strftime("%d-%m-%Y")
+        tampil["dibuat_pada"] = tampil["dibuat_pada"].dt.strftime("%d-%m-%Y %H:%M:%S")
+        tampil["diubah_pada"] = tampil["diubah_pada"].dt.strftime("%d-%m-%Y %H:%M:%S")
+        tampil["jumlah"] = tampil["jumlah"].map(rupiah)
+        st.dataframe(tampil, use_container_width=True, hide_index=True)
+
+        st.download_button(
+            "Unduh Data Transaksi",
+            data=df_semua.drop(columns=[SHEET_ROW_COLUMN], errors="ignore").to_csv(index=False).encode("utf-8-sig"),
+            file_name="transaksi_spreadsheet.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
+
+        section_header("Edit / Hapus Transaksi", "Pilih transaksi berdasarkan ID dan keterangan.")
+        pilihan_transaksi = df_semua.apply(
+            lambda row: f"{row['id']} | {row['tanggal'].strftime('%d-%m-%Y')} | {row['jenis']} | {row['kategori']} | {rupiah(row['jumlah'])}",
+            axis=1,
+        ).tolist()
+        pilihan_index = st.selectbox("Pilih transaksi", range(len(pilihan_transaksi)), format_func=lambda idx: pilihan_transaksi[idx])
+        selected = df_semua.iloc[pilihan_index]
+
+        with st.form("form_edit_transaksi"):
+            edit_jenis = st.radio(
+                "Jenis transaksi",
+                ["Pengeluaran", "Pemasukan"],
+                index=["Pengeluaran", "Pemasukan"].index(selected["jenis"]),
+                horizontal=True,
+                key="edit_jenis",
+            )
+            edit_opsi_kategori = KATEGORI_TRANSAKSI[edit_jenis].copy()
+            if selected["kategori"] not in edit_opsi_kategori:
+                edit_opsi_kategori.insert(0, selected["kategori"])
+            col1, col2 = st.columns(2)
+            with col1:
+                edit_tanggal = st.date_input("Tanggal transaksi", value=selected["tanggal"].date(), key="edit_tanggal")
+                edit_kategori = st.selectbox(
+                    "Kategori",
+                    edit_opsi_kategori,
+                    index=edit_opsi_kategori.index(selected["kategori"]),
+                    key="edit_kategori",
+                )
+            with col2:
+                edit_jumlah = st.number_input(
+                    "Jumlah",
+                    min_value=1_000,
+                    step=1_000,
+                    value=int(selected["jumlah"]),
+                    format="%d",
+                    key="edit_jumlah",
+                )
+                edit_keterangan = st.text_input("Keterangan", value=selected["keterangan"], key="edit_keterangan")
+            simpan_edit = st.form_submit_button("Simpan Perubahan", type="primary", use_container_width=True)
+
+        if simpan_edit:
+            try:
+                update_transaksi(
+                    spreadsheet_id,
+                    session,
+                    selected[SHEET_ROW_COLUMN],
+                    selected["id"],
+                    edit_tanggal,
+                    edit_jenis,
+                    edit_kategori,
+                    edit_keterangan,
+                    edit_jumlah,
+                    selected["dibuat_pada"],
+                )
+                mark_action_popup("Transaksi berhasil diedit.")
+                st.rerun()
+            except Exception as exc:
+                st.toast("Gagal mengedit transaksi.")
+                st.error(f"Gagal mengedit transaksi: {exc}")
+
+        if st.button("Hapus Transaksi", type="secondary", use_container_width=True):
+            st.session_state["delete_transaction_id"] = selected["id"]
+            st.rerun()
+
+        if st.session_state.get("delete_transaction_id"):
+            delete_id = st.session_state["delete_transaction_id"]
+            delete_match = df_semua[df_semua["id"] == delete_id]
+            if delete_match.empty:
+                st.session_state.pop("delete_transaction_id", None)
+                st.toast("Transaksi yang dipilih tidak ditemukan.")
+            else:
+                delete_row = delete_match.iloc[0]
+
+                @st.dialog("Konfirmasi Hapus")
+                def confirm_delete_dialog():
+                    st.write(f"Hapus transaksi {delete_row['id']} senilai {rupiah(delete_row['jumlah'])}?")
+                    st.caption("Data akan dihapus dari sheet Transaksi.")
+                    col_hapus, col_batal = st.columns(2)
+                    with col_hapus:
+                        if st.button("Hapus", type="primary", use_container_width=True):
+                            try:
+                                delete_transaksi(spreadsheet_id, session, delete_row[SHEET_ROW_COLUMN])
+                                st.session_state.pop("delete_transaction_id", None)
+                                mark_action_popup("Transaksi berhasil dihapus.")
+                                st.rerun()
+                            except Exception as exc:
+                                st.toast("Gagal menghapus transaksi.")
+                                st.error(f"Gagal menghapus transaksi: {exc}")
+                    with col_batal:
+                        if st.button("Batal", use_container_width=True):
+                            st.session_state.pop("delete_transaction_id", None)
+                            st.toast("Hapus transaksi dibatalkan.")
+                            st.rerun()
+
+                confirm_delete_dialog()
 
 elif menu == "Kategori":
     render_header("Kategori", "Daftar kategori dibaca dari kolom kategori pada sheet Transaksi.")
@@ -1045,7 +1243,3 @@ elif menu == "Kategori":
 
 else:
     show_setup_help()
-
-
-
-
