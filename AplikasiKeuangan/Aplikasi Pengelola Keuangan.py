@@ -223,6 +223,39 @@ st.markdown(
             color: #0f172a !important;
             font-weight: 900;
         }
+        .action-popup {
+            position: fixed;
+            top: 1.15rem;
+            right: 1.15rem;
+            z-index: 9999;
+            width: min(390px, calc(100vw - 2rem));
+            padding: 1rem 1.1rem;
+            border-radius: 16px;
+            background: #ffffff;
+            border: 1px solid #dbeafe;
+            box-shadow: 0 20px 48px rgba(15,23,42,.20);
+            color: #0f172a;
+        }
+        .action-popup-title { font-weight: 900; font-size: 1rem; margin-bottom: .22rem; color: #0f172a; }
+        .action-popup-message { font-size: .88rem; color: #475569; line-height: 1.45; }
+        .action-popup.success { border-left: 6px solid #22c55e; }
+        .action-popup.warning { border-left: 6px solid #f97316; }
+        .action-popup.danger { border-left: 6px solid #ef4444; }
+        .action-popup.info { border-left: 6px solid #3b82f6; }
+        .action-panel {
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-radius: 14px;
+            padding: 1rem 1.1rem;
+            box-shadow: 0 10px 26px rgba(15,23,42,.06);
+            margin: .65rem 0 1rem;
+        }
+        .action-panel-title { color: #0f172a; font-size: 1rem; font-weight: 900; margin-bottom: .25rem; }
+        .action-panel-note { color: #64748b; font-size: .88rem; line-height: 1.45; }
+        .data-summary-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .85rem; margin: .75rem 0 1rem; }
+        .data-summary-card { background: white; border: 1px solid #e2e8f0; border-radius: 14px; padding: .95rem 1rem; box-shadow: 0 8px 22px rgba(15,23,42,.05); }
+        .data-summary-label { color: #64748b; font-size: .78rem; font-weight: 800; margin-bottom: .32rem; }
+        .data-summary-value { color: #0f172a; font-size: 1.2rem; font-weight: 900; }
         .stButton > button, .stDownloadButton > button {
             border-radius: 12px;
             font-weight: 800;
@@ -1085,40 +1118,76 @@ elif menu == "Dashboard":
             file_name="rekap_keuangan_bulanan.csv",
             mime="text/csv",
             use_container_width=True,
+            on_click=mark_action_popup,
+            args=("Unduh dimulai", "Rekap bulanan sedang disiapkan.", "info"),
         )
 
 elif menu == "Data Transaksi":
-    render_header("Kelola Data", "Lihat, edit, atau hapus transaksi yang sudah tersimpan.")
+    render_header("Kelola Data", "Lihat daftar transaksi, lalu pilih aksi edit atau hapus dengan alur yang jelas.")
     if df_semua.empty:
         st.info("Belum ada transaksi yang dimasukkan.")
     else:
-        tampil = df_semua.drop(columns=[SHEET_ROW_COLUMN], errors="ignore").copy()
-        tampil["tanggal"] = tampil["tanggal"].dt.strftime("%d-%m-%Y")
-        tampil["dibuat_pada"] = tampil["dibuat_pada"].dt.strftime("%d-%m-%Y %H:%M:%S")
-        tampil["diubah_pada"] = tampil["diubah_pada"].dt.strftime("%d-%m-%Y %H:%M:%S")
-        tampil["jumlah"] = tampil["jumlah"].map(rupiah)
-        st.dataframe(tampil, use_container_width=True, hide_index=True)
-
-        st.download_button(
-            "Unduh Data Transaksi",
-            data=df_semua.drop(columns=[SHEET_ROW_COLUMN], errors="ignore").to_csv(index=False).encode("utf-8-sig"),
-            file_name="transaksi_spreadsheet.csv",
-            mime="text/csv",
-            use_container_width=True,
+        total_data = len(df_semua)
+        total_nominal = df_semua["jumlah"].sum()
+        terakhir_diubah = df_semua["diubah_pada"].max()
+        st.markdown(
+            f"""
+            <div class="data-summary-row">
+                <div class="data-summary-card">
+                    <div class="data-summary-label">Total Transaksi</div>
+                    <div class="data-summary-value">{total_data}</div>
+                </div>
+                <div class="data-summary-card">
+                    <div class="data-summary-label">Total Nominal</div>
+                    <div class="data-summary-value">{rupiah(total_nominal)}</div>
+                </div>
+                <div class="data-summary-card">
+                    <div class="data-summary-label">Terakhir Diubah</div>
+                    <div class="data-summary-value">{terakhir_diubah.strftime('%d-%m-%Y') if pd.notna(terakhir_diubah) else '-'}</div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
 
         pilihan_transaksi = df_semua.apply(
             lambda row: f"{row['id']} | {row['tanggal'].strftime('%d-%m-%Y')} | {row['jenis']} | {row['kategori']} | {rupiah(row['jumlah'])} | {row['keterangan']}",
             axis=1,
         ).tolist()
-        tab_edit, tab_hapus = st.tabs(["Edit Data", "Hapus Data"])
+        tab_data, tab_edit, tab_hapus = st.tabs(["Data Transaksi", "Edit Data", "Hapus Data"])
+
+        with tab_data:
+            st.markdown(
+                """
+                <div class="action-panel">
+                    <div class="action-panel-title">Daftar transaksi</div>
+                    <div class="action-panel-note">Gunakan tabel ini untuk mengecek data sebelum melakukan edit atau hapus.</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            tampil = df_semua.drop(columns=[SHEET_ROW_COLUMN], errors="ignore").copy()
+            tampil["tanggal"] = tampil["tanggal"].dt.strftime("%d-%m-%Y")
+            tampil["dibuat_pada"] = tampil["dibuat_pada"].dt.strftime("%d-%m-%Y %H:%M:%S")
+            tampil["diubah_pada"] = tampil["diubah_pada"].dt.strftime("%d-%m-%Y %H:%M:%S")
+            tampil["jumlah"] = tampil["jumlah"].map(rupiah)
+            st.dataframe(tampil, use_container_width=True, hide_index=True)
+            st.download_button(
+                "Unduh Data Transaksi",
+                data=df_semua.drop(columns=[SHEET_ROW_COLUMN], errors="ignore").to_csv(index=False).encode("utf-8-sig"),
+                file_name="transaksi.csv",
+                mime="text/csv",
+                use_container_width=True,
+                on_click=mark_action_popup,
+                args=("Unduh dimulai", "File data transaksi sedang disiapkan.", "info"),
+            )
 
         with tab_edit:
             st.markdown(
                 """
                 <div class="action-panel">
                     <div class="action-panel-title">Edit transaksi tersimpan</div>
-                    <div class="action-panel-note">Pilih satu transaksi, ubah field yang diperlukan, lalu simpan. ID transaksi dan waktu dibuat tetap dipertahankan.</div>
+                    <div class="action-panel-note">Pilih satu transaksi, ubah field yang diperlukan, lalu simpan perubahan.</div>
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -1131,7 +1200,6 @@ elif menu == "Data Transaksi":
             )
             selected = df_semua.iloc[pilihan_index]
             st.caption(f"ID terpilih: {selected['id']}")
-
             with st.form("form_edit_transaksi"):
                 edit_jenis = st.radio(
                     "Jenis transaksi",
@@ -1162,8 +1230,8 @@ elif menu == "Data Transaksi":
                         key="edit_jumlah",
                     )
                     edit_keterangan = st.text_input("Keterangan", value=selected["keterangan"], key="edit_keterangan")
+                st.caption(f"Perubahan akan disimpan untuk transaksi {selected['id']}.")
                 simpan_edit = st.form_submit_button("Simpan Perubahan", type="primary", use_container_width=True)
-
             if simpan_edit:
                 try:
                     update_transaksi(
@@ -1189,7 +1257,7 @@ elif menu == "Data Transaksi":
                 """
                 <div class="action-panel">
                     <div class="action-panel-title">Hapus transaksi</div>
-                    <div class="action-panel-note">Pilih transaksi yang ingin dihapus. Aplikasi akan meminta konfirmasi sebelum data dihapus.</div>
+                    <div class="action-panel-note">Pilih transaksi, cek preview, lalu lanjutkan ke konfirmasi hapus.</div>
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -1214,7 +1282,6 @@ elif menu == "Data Transaksi":
                 render_action_popup("Hapus gagal", "Transaksi yang dipilih tidak ditemukan.", "warning")
             else:
                 delete_row = delete_match.iloc[0]
-
                 @st.dialog("Konfirmasi Hapus Transaksi")
                 def confirm_delete_dialog():
                     st.markdown(
@@ -1243,21 +1310,73 @@ elif menu == "Data Transaksi":
                             st.session_state.pop("delete_transaction_id", None)
                             mark_action_popup("Hapus dibatalkan", "Tidak ada data yang dihapus.", "info")
                             st.rerun()
-
                 confirm_delete_dialog()
 
 elif menu == "Kategori":
-    render_header("Kategori", "Ringkasan kategori dari transaksi yang tersimpan.")
+    render_header("Ringkasan Kategori", "Filter transaksi berdasarkan bulan, jenis, dan kategori.")
     if df_semua.empty:
         st.info("Belum ada transaksi yang dimasukkan.")
     else:
-        kategori_rekap = (
-            df_semua.groupby(["jenis", "kategori"], as_index=False)
-            .agg(jumlah_transaksi=("id", "count"), total=("jumlah", "sum"))
-            .sort_values(["jenis", "kategori"])
-        )
-        kategori_rekap["total"] = kategori_rekap["total"].map(rupiah)
-        st.dataframe(kategori_rekap, use_container_width=True, hide_index=True)
+        data_kategori = df_semua.copy()
+        data_kategori["bulan"] = data_kategori["tanggal"].dt.to_period("M")
+        bulan_opsi = sorted(data_kategori["bulan"].dropna().unique(), reverse=True)
+        col_bulan, col_jenis, col_kategori = st.columns(3)
+        with col_bulan:
+            bulan_filter = st.selectbox(
+                "Bulan",
+                ["Semua Bulan"] + bulan_opsi,
+                format_func=lambda item: item if isinstance(item, str) else f"{NAMA_BULAN[item.month]} {item.year}",
+            )
+        with col_jenis:
+            jenis_filter = st.multiselect(
+                "Jenis",
+                ["Pemasukan", "Pengeluaran"],
+                default=["Pemasukan", "Pengeluaran"],
+            )
+        if bulan_filter != "Semua Bulan":
+            data_kategori = data_kategori[data_kategori["bulan"] == bulan_filter]
+        if jenis_filter:
+            data_kategori = data_kategori[data_kategori["jenis"].isin(jenis_filter)]
+        else:
+            data_kategori = data_kategori.iloc[0:0]
+        kategori_opsi = sorted(data_kategori["kategori"].dropna().unique().tolist())
+        with col_kategori:
+            kategori_filter = st.multiselect("Kategori", kategori_opsi, default=kategori_opsi)
+        if kategori_filter:
+            data_kategori = data_kategori[data_kategori["kategori"].isin(kategori_filter)]
+        else:
+            data_kategori = data_kategori.iloc[0:0]
+
+        if data_kategori.empty:
+            st.info("Belum ada transaksi yang sesuai dengan filter.")
+        else:
+            total_filter = data_kategori["jumlah"].sum()
+            st.markdown(
+                f"""
+                <div class="data-summary-row">
+                    <div class="data-summary-card">
+                        <div class="data-summary-label">Transaksi Terfilter</div>
+                        <div class="data-summary-value">{len(data_kategori)}</div>
+                    </div>
+                    <div class="data-summary-card">
+                        <div class="data-summary-label">Total Nominal</div>
+                        <div class="data-summary-value">{rupiah(total_filter)}</div>
+                    </div>
+                    <div class="data-summary-card">
+                        <div class="data-summary-label">Kategori</div>
+                        <div class="data-summary-value">{data_kategori['kategori'].nunique()}</div>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            kategori_rekap = (
+                data_kategori.groupby(["jenis", "kategori"], as_index=False)
+                .agg(jumlah_transaksi=("id", "count"), total=("jumlah", "sum"))
+                .sort_values(["jenis", "kategori"])
+            )
+            kategori_rekap["total"] = kategori_rekap["total"].map(rupiah)
+            st.dataframe(kategori_rekap, use_container_width=True, hide_index=True)
 
 else:
     show_setup_help()
