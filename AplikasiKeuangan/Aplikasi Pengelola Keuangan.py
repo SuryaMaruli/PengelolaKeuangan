@@ -30,6 +30,27 @@ TRANSAKSI_COLUMNS = [
     "diubah_pada",
 ]
 KATEGORI_COLUMNS = ["Jenis", "Kategori"]
+HEADER_ALIASES = {
+    "id": "id",
+    "tanggal": "tanggal",
+    "tgl": "tanggal",
+    "date": "tanggal",
+    "jenis": "jenis",
+    "tipe": "jenis",
+    "type": "jenis",
+    "kategori": "kategori",
+    "category": "kategori",
+    "keterangan": "keterangan",
+    "catatan": "keterangan",
+    "deskripsi": "keterangan",
+    "jumlah": "jumlah",
+    "nominal": "jumlah",
+    "amount": "jumlah",
+    "dibuat_pada": "dibuat_pada",
+    "created_at": "dibuat_pada",
+    "diubah_pada": "diubah_pada",
+    "updated_at": "diubah_pada",
+}
 
 WARNA_JENIS = {
     "Pemasukan": "#22C55E",
@@ -281,18 +302,22 @@ def fetch_values(spreadsheet_id, range_name, _session):
     return response.json().get("values", [])
 
 
+def normalize_header(header):
+    text = str(header).strip()
+    key = re.sub(r"\s+", "_", text.lower())
+    return HEADER_ALIASES.get(key, text)
+
+
 def values_to_df(values, expected_headers):
     if not values:
         return pd.DataFrame(columns=expected_headers)
 
-    headers = [str(item).strip() for item in values[0]]
+    headers = [normalize_header(item) for item in values[0]]
     rows = values[1:]
     width = max(len(headers), len(expected_headers))
     headers = (headers + expected_headers)[:width]
     normalized = [row + [""] * (width - len(row)) for row in rows]
-    return pd.DataFrame(normalized, columns=headers).rename(
-        columns=lambda item: str(item).strip()
-    )
+    return pd.DataFrame(normalized, columns=headers)
 
 
 def normalize_jenis(nilai):
@@ -323,10 +348,10 @@ def prepare_transaksi(df):
     clean["jenis"] = clean["jenis"].map(normalize_jenis)
     clean["kategori"] = clean["kategori"].astype(str).str.strip()
     clean["keterangan"] = clean["keterangan"].astype(str).str.strip()
-    clean["tanggal"] = pd.to_datetime(clean["tanggal"], errors="coerce")
+    clean["tanggal"] = pd.to_datetime(clean["tanggal"], errors="coerce", dayfirst=True)
     clean["jumlah"] = clean["jumlah"].map(normalize_jumlah)
-    clean["dibuat_pada"] = pd.to_datetime(clean["dibuat_pada"], errors="coerce")
-    clean["diubah_pada"] = pd.to_datetime(clean["diubah_pada"], errors="coerce")
+    clean["dibuat_pada"] = pd.to_datetime(clean["dibuat_pada"], errors="coerce", dayfirst=True)
+    clean["diubah_pada"] = pd.to_datetime(clean["diubah_pada"], errors="coerce", dayfirst=True)
     clean = clean.dropna(subset=["tanggal", "jumlah"])
     clean = clean[clean["jenis"].isin(["Pemasukan", "Pengeluaran"])]
     clean["jumlah"] = clean["jumlah"].fillna(0)
@@ -798,7 +823,36 @@ with st.sidebar:
 
 if df_semua.empty and menu != "Panduan":
     render_header(APP_TITLE, "Spreadsheet sudah terhubung, tetapi belum ada transaksi valid.")
-    st.warning("Pastikan sheet Transaksi memiliki tanggal, jenis, kategori, dan jumlah yang valid.")
+    st.warning("Sheet Kategori sudah terbaca, tetapi sheet Transaksi belum memiliki baris yang valid.")
+    st.markdown(
+        """
+        <div class="section-card">
+            <div class="section-title">Cek Sheet Transaksi</div>
+            <div class="section-subtitle">Header boleh huruf besar/kecil, tetapi isi data wajib valid.</div>
+            <p><b>jenis</b> harus berisi Pemasukan atau Pengeluaran.</p>
+            <p><b>tanggal</b> bisa memakai format 26/07/2026, 26-07-2026, atau 2026-07-26.</p>
+            <p><b>jumlah</b> harus angka, misalnya 50000 atau Rp 50.000.</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    contoh = pd.DataFrame(
+        [
+            {
+                "id": "1",
+                "tanggal": "26/07/2026",
+                "jenis": "Pengeluaran",
+                "kategori": "Makan / Jajan",
+                "keterangan": "Makan siang",
+                "jumlah": "25000",
+                "dibuat_pada": "26/07/2026",
+                "diubah_pada": "26/07/2026",
+            }
+        ]
+    )
+    st.caption("Contoh baris yang valid untuk sheet Transaksi")
+    st.dataframe(contoh, use_container_width=True, hide_index=True)
+    st.caption("Kategori yang berhasil terbaca")
     st.dataframe(df_kategori, use_container_width=True, hide_index=True)
     st.stop()
 
