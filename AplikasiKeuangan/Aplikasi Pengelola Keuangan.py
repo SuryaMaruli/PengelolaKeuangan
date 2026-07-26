@@ -390,8 +390,9 @@ def load_spreadsheet(spreadsheet_id, session):
 
 
 def append_transaksi(spreadsheet_id, session, tanggal, jenis, kategori, keterangan, jumlah):
-    now = pd.Timestamp.now(tz="Asia/Jakarta").strftime("%Y-%m-%d %H:%M:%S")
-    transaction_id = f"TRX-{pd.Timestamp.now(tz='Asia/Jakarta').strftime('%Y%m%d%H%M%S')}"
+    timestamp = pd.Timestamp.now(tz="Asia/Jakarta")
+    now = timestamp.strftime("%Y-%m-%d %H:%M:%S")
+    transaction_id = f"TRX-{timestamp.strftime('%Y%m%d%H%M%S%f')}"
     row = [
         transaction_id,
         tanggal.strftime("%Y-%m-%d"),
