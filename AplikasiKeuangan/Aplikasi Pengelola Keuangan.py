@@ -308,7 +308,7 @@ def sheets_api_url(spreadsheet_id, path):
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def fetch_values(spreadsheet_id, range_name, _session):
+def fetch_values(spreadsheet_id, range_name, refresh_key, _session):
     url = sheets_api_url(spreadsheet_id, f"values/{quote(range_name)}")
     response = _session.get(url, timeout=20)
     if not response.ok:
@@ -321,7 +321,7 @@ def fetch_values(spreadsheet_id, range_name, _session):
 def update_values(spreadsheet_id, range_name, session, values):
     url = (
         sheets_api_url(spreadsheet_id, f"values/{quote(range_name)}")
-        + "?valueInputOption=USER_ENTERED"
+        + "?valueInputOption=RAW"
     )
     response = session.put(url, json={"values": values}, timeout=20)
     if not response.ok:
@@ -330,8 +330,8 @@ def update_values(spreadsheet_id, range_name, session, values):
         )
 
 
-def ensure_transaksi_header(spreadsheet_id, session):
-    values = fetch_values(spreadsheet_id, TRANSAKSI_HEADER_RANGE, session)
+def ensure_transaksi_header(spreadsheet_id, session, refresh_key=0):
+    values = fetch_values(spreadsheet_id, TRANSAKSI_HEADER_RANGE, refresh_key, session)
     current_header = [normalize_header(item) for item in values[0]] if values else []
     if current_header[: len(TRANSAKSI_COLUMNS)] == TRANSAKSI_COLUMNS:
         return
@@ -367,13 +367,43 @@ def normalize_jenis(nilai):
     return str(nilai).strip()
 
 
+def normalize_tanggal(nilai):
+    if pd.isna(nilai):
+        return pd.NaT
+
+    text = str(nilai).strip()
+    if not text:
+        return pd.NaT
+
+    serial = pd.to_numeric(text, errors="coerce")
+    if pd.notna(serial) and 20_000 <= serial <= 80_000:
+        return pd.Timestamp("1899-12-30") + pd.to_timedelta(serial, unit="D")
+
+    return pd.to_datetime(text, errors="coerce", dayfirst=True)
+
+
 def normalize_jumlah(nilai):
     text = str(nilai).strip()
     text = re.sub(r"[^0-9,.-]", "", text)
+    if not text:
+        return pd.NA
+
     if "," in text and "." in text:
-        text = text.replace(".", "").replace(",", ".")
+        if text.rfind(",") > text.rfind("."):
+            text = text.replace(".", "").replace(",", ".")
+        else:
+            text = text.replace(",", "")
+    elif "." in text:
+        parts = text.split(".")
+        if len(parts) > 1 and all(len(part) == 3 for part in parts[1:]):
+            text = "".join(parts)
     elif "," in text:
-        text = text.replace(",", ".")
+        parts = text.split(",")
+        if len(parts) > 1 and all(len(part) == 3 for part in parts[1:]):
+            text = "".join(parts)
+        else:
+            text = text.replace(",", ".")
+
     return pd.to_numeric(text, errors="coerce")
 
 
@@ -386,20 +416,20 @@ def prepare_transaksi(df):
     clean["jenis"] = clean["jenis"].map(normalize_jenis)
     clean["kategori"] = clean["kategori"].astype(str).str.strip()
     clean["keterangan"] = clean["keterangan"].astype(str).str.strip()
-    clean["tanggal"] = pd.to_datetime(clean["tanggal"], errors="coerce", dayfirst=True)
+    clean["tanggal"] = clean["tanggal"].map(normalize_tanggal)
     clean["jumlah"] = clean["jumlah"].map(normalize_jumlah)
-    clean["dibuat_pada"] = pd.to_datetime(clean["dibuat_pada"], errors="coerce", dayfirst=True)
-    clean["diubah_pada"] = pd.to_datetime(clean["diubah_pada"], errors="coerce", dayfirst=True)
+    clean["dibuat_pada"] = clean["dibuat_pada"].map(normalize_tanggal)
+    clean["diubah_pada"] = clean["diubah_pada"].map(normalize_tanggal)
     clean = clean.dropna(subset=["tanggal", "jumlah"])
     clean = clean[clean["jenis"].isin(["Pemasukan", "Pengeluaran"])]
     clean["jumlah"] = clean["jumlah"].fillna(0)
     return clean.sort_values(["tanggal", "id"], ascending=[False, False])
 
 
-def load_spreadsheet(spreadsheet_id, session):
-    ensure_transaksi_header(spreadsheet_id, session)
+def load_spreadsheet(spreadsheet_id, session, refresh_key=0):
+    ensure_transaksi_header(spreadsheet_id, session, refresh_key)
     transaksi = values_to_df(
-        fetch_values(spreadsheet_id, TRANSAKSI_RANGE, session),
+        fetch_values(spreadsheet_id, TRANSAKSI_RANGE, refresh_key, session),
         TRANSAKSI_COLUMNS,
     )
     return prepare_transaksi(transaksi)
@@ -422,14 +452,14 @@ def append_transaksi(spreadsheet_id, session, tanggal, jenis, kategori, keterang
     ensure_transaksi_header(spreadsheet_id, session)
     url = (
         sheets_api_url(spreadsheet_id, f"values/{quote(TRANSAKSI_RANGE)}:append")
-        + "?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS"
+        + "?valueInputOption=RAW&insertDataOption=INSERT_ROWS"
     )
     response = session.post(url, json={"values": [row]}, timeout=20)
     if not response.ok:
         raise RuntimeError(
             f"Google Sheets API error {response.status_code}: {response.text}"
         )
-    st.cache_data.clear()
+    refresh_spreadsheet_cache()
     return transaction_id
 
 
@@ -446,6 +476,13 @@ def show_saved_transaction_message():
         )
 
 
+
+
+def refresh_spreadsheet_cache():
+    st.cache_data.clear()
+    st.session_state["spreadsheet_refresh_key"] = (
+        st.session_state.get("spreadsheet_refresh_key", 0) + 1
+    )
 def filter_data(df):
     if df.empty:
         return df
@@ -844,7 +881,7 @@ with st.sidebar:
         st.warning("Secrets gcp_service_account belum ditemukan.")
     st.caption(f"Judul spreadsheet: {APP_TITLE}")
     if st.button("Muat ulang data", use_container_width=True):
-        st.cache_data.clear()
+        refresh_spreadsheet_cache()
 
     menu = st.radio(
         "Menu",
@@ -867,7 +904,8 @@ if not service_account_info or not spreadsheet_id:
 try:
     with st.spinner("Mengambil data dari Google Spreadsheet..."):
         session = create_authorized_session(service_account_info)
-        df_semua = load_spreadsheet(spreadsheet_id, session)
+        spreadsheet_refresh_key = st.session_state.get("spreadsheet_refresh_key", 0)
+        df_semua = load_spreadsheet(spreadsheet_id, session, spreadsheet_refresh_key)
 except Exception as exc:
     render_header(APP_TITLE, "Data belum bisa dimuat dari Google Spreadsheet.")
     st.error(f"Gagal membaca spreadsheet: {exc}")
