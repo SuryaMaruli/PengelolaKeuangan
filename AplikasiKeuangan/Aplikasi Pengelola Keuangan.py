@@ -407,6 +407,20 @@ def append_transaksi(spreadsheet_id, session, tanggal, jenis, kategori, keterang
     st.cache_data.clear()
     return transaction_id
 
+
+def mark_transaction_saved(transaction_id):
+    st.session_state["last_saved_transaction_id"] = transaction_id
+
+
+def show_saved_transaction_message():
+    transaction_id = st.session_state.pop("last_saved_transaction_id", None)
+    if transaction_id:
+        st.success(
+            "Transaksi berhasil disimpan ke spreadsheet dan data terbaru "
+            f"sudah dibaca ulang dengan ID {transaction_id}."
+        )
+
+
 def filter_data(df):
     if df.empty:
         return df
@@ -885,6 +899,7 @@ if df_semua.empty and menu not in ["Panduan", "Tambah Transaksi", "Kategori"]:
 
 if menu == "Tambah Transaksi":
     render_header("Tambah Transaksi", "Input transaksi dari Streamlit dan simpan otomatis ke sheet Transaksi.")
+    show_saved_transaction_message()
     if df_kategori.empty:
         st.warning("Sheet Kategori masih kosong. Isi dulu kategori agar dropdown dapat digunakan.")
     else:
@@ -919,8 +934,8 @@ if menu == "Tambah Transaksi":
                         keterangan,
                         jumlah,
                     )
-                    st.success(f"Transaksi berhasil disimpan ke spreadsheet dengan ID {transaction_id}.")
-                    st.info("Klik Muat ulang data di sidebar bila data belum langsung muncul di dashboard.")
+                    mark_transaction_saved(transaction_id)
+                    st.rerun()
                 except Exception as exc:
                     st.error(f"Gagal menyimpan transaksi: {exc}")
 
