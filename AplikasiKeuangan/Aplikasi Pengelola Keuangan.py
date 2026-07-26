@@ -29,6 +29,22 @@ TRANSAKSI_COLUMNS = [
     "dibuat_pada",
     "diubah_pada",
 ]
+KATEGORI_TRANSAKSI = {
+    "Pengeluaran": [
+        "Makan / Jajan",
+        "Barang",
+        "Biaya Wajib",
+        "Biaya Tak Terduga",
+        "Pekerjaan",
+        "Kebutuhan Sehari-hari",
+    ],
+    "Pemasukan": [
+        "Gaji",
+        "Sampingan / Joki",
+        "Translok",
+    ],
+}
+
 HEADER_ALIASES = {
     "id": "id",
     "tanggal": "tanggal",
@@ -908,45 +924,33 @@ if menu == "Tambah Transaksi":
     render_header("Tambah Transaksi", "Input transaksi dari Streamlit, simpan ke sheet Transaksi, lalu baca ulang dari spreadsheet.")
     show_saved_transaction_message()
     jenis = st.radio("Jenis transaksi", ["Pengeluaran", "Pemasukan"], horizontal=True)
-    kategori_tersimpan = []
-    if not df_semua.empty:
-        kategori_tersimpan = sorted(
-            df_semua.loc[df_semua["jenis"] == jenis, "kategori"]
-            .dropna()
-            .unique()
-            .tolist()
-        )
-    if kategori_tersimpan:
-        st.caption("Kategori yang sudah ada: " + ", ".join(kategori_tersimpan[:12]))
+    opsi_kategori = KATEGORI_TRANSAKSI[jenis]
 
     with st.form("form_tambah_transaksi", clear_on_submit=True):
         col1, col2 = st.columns(2)
         with col1:
             tanggal = st.date_input("Tanggal transaksi")
-            kategori = st.text_input("Kategori", placeholder="Contoh: Makan / Jajan")
+            kategori = st.selectbox("Kategori", opsi_kategori)
         with col2:
             jumlah = st.number_input("Jumlah", min_value=1_000, step=1_000, format="%d")
             keterangan = st.text_input("Keterangan", placeholder="Contoh: makan siang")
         simpan = st.form_submit_button("Simpan ke Spreadsheet", type="primary", use_container_width=True)
 
     if simpan:
-        if not kategori.strip():
-            st.error("Kategori wajib diisi sebelum transaksi disimpan.")
-        else:
-            try:
-                transaction_id = append_transaksi(
-                    spreadsheet_id,
-                    session,
-                    tanggal,
-                    jenis,
-                    kategori,
-                    keterangan,
-                    jumlah,
-                )
-                mark_transaction_saved(transaction_id)
-                st.rerun()
-            except Exception as exc:
-                st.error(f"Gagal menyimpan transaksi: {exc}")
+        try:
+            transaction_id = append_transaksi(
+                spreadsheet_id,
+                session,
+                tanggal,
+                jenis,
+                kategori,
+                keterangan,
+                jumlah,
+            )
+            mark_transaction_saved(transaction_id)
+            st.rerun()
+        except Exception as exc:
+            st.error(f"Gagal menyimpan transaksi: {exc}")
 
 elif menu == "Dashboard":
     render_header(APP_TITLE, "Pantau transaksi dari Google Spreadsheet dalam visualisasi interaktif.")
