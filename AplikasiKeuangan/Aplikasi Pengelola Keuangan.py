@@ -911,18 +911,6 @@ except Exception as exc:
     st.info("Periksa Secrets gcp_service_account, spreadsheet.id, nama sheet, dan pastikan spreadsheet sudah di-share ke client_email service account sebagai Editor.")
     st.stop()
 
-with st.sidebar:
-    st.markdown(
-        f"""
-        <div class="sidebar-summary">
-            <div class="sidebar-summary-label">Transaksi valid terbaca</div>
-            <div class="sidebar-summary-value">{len(df_semua)}</div>
-            <div class="sidebar-summary-note">{df_semua["kategori"].nunique()} kategori dari transaksi</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
 if df_semua.empty and menu not in ["Panduan", "Tambah Transaksi", "Kategori"]:
     render_header(APP_TITLE, "Spreadsheet sudah terhubung, tetapi belum ada transaksi valid.")
     st.warning("Sheet Transaksi belum memiliki baris transaksi yang valid.")
