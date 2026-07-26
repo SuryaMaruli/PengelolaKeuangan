@@ -1199,26 +1199,27 @@ elif menu == "Data Transaksi":
                 key="edit_transaction_select",
             )
             selected = df_semua.iloc[pilihan_index]
+            edit_key = re.sub(r"[^a-zA-Z0-9_]", "_", str(selected["id"]))
             st.caption(f"ID terpilih: {selected['id']}")
-            with st.form("form_edit_transaksi"):
+            with st.form(f"form_edit_transaksi_{edit_key}"):
                 edit_jenis = st.radio(
                     "Jenis transaksi",
                     ["Pengeluaran", "Pemasukan"],
                     index=["Pengeluaran", "Pemasukan"].index(selected["jenis"]),
                     horizontal=True,
-                    key="edit_jenis",
+                    key=f"edit_jenis_{edit_key}",
                 )
                 edit_opsi_kategori = KATEGORI_TRANSAKSI[edit_jenis].copy()
                 if selected["kategori"] not in edit_opsi_kategori:
                     edit_opsi_kategori.insert(0, selected["kategori"])
                 col1, col2 = st.columns(2)
                 with col1:
-                    edit_tanggal = st.date_input("Tanggal transaksi", value=selected["tanggal"].date(), key="edit_tanggal")
+                    edit_tanggal = st.date_input("Tanggal transaksi", value=selected["tanggal"].date(), key=f"edit_tanggal_{edit_key}")
                     edit_kategori = st.selectbox(
                         "Kategori",
                         edit_opsi_kategori,
                         index=edit_opsi_kategori.index(selected["kategori"]),
-                        key="edit_kategori",
+                        key=f"edit_kategori_{edit_key}",
                     )
                 with col2:
                     edit_jumlah = st.number_input(
@@ -1227,9 +1228,9 @@ elif menu == "Data Transaksi":
                         step=1_000,
                         value=int(selected["jumlah"]),
                         format="%d",
-                        key="edit_jumlah",
+                        key=f"edit_jumlah_{edit_key}",
                     )
-                    edit_keterangan = st.text_input("Keterangan", value=selected["keterangan"], key="edit_keterangan")
+                    edit_keterangan = st.text_input("Keterangan", value=selected["keterangan"], key=f"edit_keterangan_{edit_key}")
                 st.caption(f"Perubahan akan disimpan untuk transaksi {selected['id']}.")
                 simpan_edit = st.form_submit_button("Simpan Perubahan", type="primary", use_container_width=True)
             if simpan_edit:
