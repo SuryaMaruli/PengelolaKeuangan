@@ -283,7 +283,7 @@ def get_spreadsheet_id(default=""):
 def create_authorized_session(service_account_info):
     credentials = service_account.Credentials.from_service_account_info(
         service_account_info,
-        scopes=["https://www.googleapis.com/auth/spreadsheets.readonly"],
+        scopes=["https://www.googleapis.com/auth/spreadsheets"],
     )
     return AuthorizedSession(credentials)
 
@@ -380,6 +380,32 @@ def load_spreadsheet(spreadsheet_id, session):
     )
     return prepare_transaksi(transaksi), prepare_kategori(kategori)
 
+
+def append_transaksi(spreadsheet_id, session, tanggal, jenis, kategori, keterangan, jumlah):
+    now = pd.Timestamp.now(tz="Asia/Jakarta").strftime("%Y-%m-%d %H:%M:%S")
+    transaction_id = f"TRX-{pd.Timestamp.now(tz='Asia/Jakarta').strftime('%Y%m%d%H%M%S')}"
+    row = [
+        transaction_id,
+        tanggal.strftime("%Y-%m-%d"),
+        jenis,
+        kategori,
+        keterangan.strip(),
+        int(jumlah),
+        now,
+        now,
+    ]
+    url = (
+        "https://sheets.googleapis.com/v4/spreadsheets/"
+        f"{spreadsheet_id}/values/{quote('Transaksi!A:H')}:append"
+        "?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS"
+    )
+    response = session.post(url, json={"values": [row]}, timeout=20)
+    if not response.ok:
+        raise RuntimeError(
+            f"Google Sheets API error {response.status_code}: {response.text}"
+        )
+    st.cache_data.clear()
+    return transaction_id
 
 def filter_data(df):
     if df.empty:
@@ -784,9 +810,10 @@ with st.sidebar:
 
     menu = st.radio(
         "Menu",
-        ["Dashboard", "Data Transaksi", "Kategori", "Panduan"],
+        ["Dashboard", "Tambah Transaksi", "Data Transaksi", "Kategori", "Panduan"],
         format_func=lambda item: {
             "Dashboard": "Dashboard  |  Visualisasi",
+            "Tambah Transaksi": "Input Data  |  Simpan ke sheet",
             "Data Transaksi": "Transaksi  |  Tabel data",
             "Kategori": "Kategori  |  Referensi",
             "Panduan": "Panduan  |  Setup",
@@ -806,7 +833,7 @@ try:
 except Exception as exc:
     render_header(APP_TITLE, "Data belum bisa dimuat dari Google Spreadsheet.")
     st.error(f"Gagal membaca spreadsheet: {exc}")
-    st.info("Periksa Secrets gcp_service_account, spreadsheet.id, nama sheet, dan pastikan spreadsheet sudah di-share ke client_email service account.")
+    st.info("Periksa Secrets gcp_service_account, spreadsheet.id, nama sheet, dan pastikan spreadsheet sudah di-share ke client_email service account sebagai Editor.")
     st.stop()
 
 with st.sidebar:
@@ -821,7 +848,7 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
 
-if df_semua.empty and menu != "Panduan":
+if df_semua.empty and menu not in ["Panduan", "Tambah Transaksi", "Kategori"]:
     render_header(APP_TITLE, "Spreadsheet sudah terhubung, tetapi belum ada transaksi valid.")
     st.warning("Sheet Kategori sudah terbaca, tetapi sheet Transaksi belum memiliki baris yang valid.")
     st.markdown(
@@ -856,7 +883,48 @@ if df_semua.empty and menu != "Panduan":
     st.dataframe(df_kategori, use_container_width=True, hide_index=True)
     st.stop()
 
-if menu == "Dashboard":
+if menu == "Tambah Transaksi":
+    render_header("Tambah Transaksi", "Input transaksi dari Streamlit dan simpan otomatis ke sheet Transaksi.")
+    if df_kategori.empty:
+        st.warning("Sheet Kategori masih kosong. Isi dulu kategori agar dropdown dapat digunakan.")
+    else:
+        jenis = st.radio("Jenis transaksi", ["Pengeluaran", "Pemasukan"], horizontal=True)
+        opsi_kategori = sorted(
+            df_kategori.loc[df_kategori["Jenis"] == jenis, "Kategori"]
+            .dropna()
+            .unique()
+            .tolist()
+        )
+        if not opsi_kategori:
+            st.warning(f"Belum ada kategori untuk jenis {jenis} di sheet Kategori.")
+        else:
+            with st.form("form_tambah_transaksi", clear_on_submit=True):
+                col1, col2 = st.columns(2)
+                with col1:
+                    tanggal = st.date_input("Tanggal transaksi")
+                    kategori = st.selectbox("Kategori", opsi_kategori)
+                with col2:
+                    jumlah = st.number_input("Jumlah", min_value=1_000, step=1_000, format="%d")
+                    keterangan = st.text_input("Keterangan", placeholder="Contoh: makan siang")
+                simpan = st.form_submit_button("Simpan ke Spreadsheet", type="primary", use_container_width=True)
+
+            if simpan:
+                try:
+                    transaction_id = append_transaksi(
+                        spreadsheet_id,
+                        session,
+                        tanggal,
+                        jenis,
+                        kategori,
+                        keterangan,
+                        jumlah,
+                    )
+                    st.success(f"Transaksi berhasil disimpan ke spreadsheet dengan ID {transaction_id}.")
+                    st.info("Klik Muat ulang data di sidebar bila data belum langsung muncul di dashboard.")
+                except Exception as exc:
+                    st.error(f"Gagal menyimpan transaksi: {exc}")
+
+elif menu == "Dashboard":
     render_header(APP_TITLE, "Pantau transaksi dari Google Spreadsheet dalam visualisasi interaktif.")
     df_filter = filter_data(df_semua)
     if df_filter.empty:
