@@ -612,50 +612,6 @@ def refresh_spreadsheet_cache():
     )
 
 
-def filter_data(df):
-    if df.empty:
-        return df
-
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("Filter Data")
-    tanggal_min = df["tanggal"].min().date()
-    tanggal_max = df["tanggal"].max().date()
-    rentang = st.sidebar.date_input(
-        "Rentang tanggal",
-        value=(tanggal_min, tanggal_max),
-        min_value=tanggal_min,
-        max_value=tanggal_max,
-    )
-    jenis_filter = st.sidebar.multiselect(
-        "Jenis transaksi",
-        ["Pemasukan", "Pengeluaran"],
-        default=["Pemasukan", "Pengeluaran"],
-    )
-    kategori_list = sorted(df["kategori"].dropna().unique().tolist())
-    kategori_filter = st.sidebar.multiselect(
-        "Kategori",
-        kategori_list,
-        default=kategori_list,
-    )
-
-    filtered = df.copy()
-    if isinstance(rentang, (tuple, list)) and len(rentang) == 2:
-        filtered = filtered[
-            (filtered["tanggal"].dt.date >= rentang[0])
-            & (filtered["tanggal"].dt.date <= rentang[1])
-        ]
-    filtered = (
-        filtered[filtered["jenis"].isin(jenis_filter)]
-        if jenis_filter
-        else filtered.iloc[0:0]
-    )
-    filtered = (
-        filtered[filtered["kategori"].isin(kategori_filter)]
-        if kategori_filter
-        else filtered.iloc[0:0]
-    )
-    return filtered
-
 
 def format_plotly(fig, tinggi=420):
     fig.update_layout(
@@ -691,13 +647,13 @@ def tampilkan_kartu_ringkasan(df):
 
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        metric_card("Total Pemasukan", rupiah(pemasukan), "Akumulasi pemasukan pada filter aktif")
+        metric_card("Total Pemasukan", rupiah(pemasukan), "Akumulasi seluruh pemasukan")
     with col2:
         metric_card("Total Pengeluaran", rupiah(pengeluaran), f"{rasio:.1f}% dari pemasukan")
     with col3:
         metric_card("Saldo Bersih", rupiah(saldo), "Pemasukan dikurangi pengeluaran")
     with col4:
-        metric_card("Jumlah Transaksi", str(len(df)), "Transaksi pada filter aktif")
+        metric_card("Jumlah Transaksi", str(len(df)), "Total transaksi tercatat")
 
     if saldo < 0:
         st.markdown('<div class="status-negative">Pengeluaran lebih besar daripada pemasukan.</div>', unsafe_allow_html=True)
@@ -754,7 +710,7 @@ def grafik_kategori(df, jenis):
         .sort_values("jumlah", ascending=True)
     )
     if data.empty:
-        st.info(f"Belum ada data {jenis.lower()} pada filter aktif.")
+        st.info(f"Belum ada data {jenis.lower()}.")
         return
     fig = px.bar(
         data,
@@ -1081,47 +1037,42 @@ if menu == "Tambah Transaksi":
             st.error(f"Gagal menyimpan transaksi: {exc}")
 
 elif menu == "Dashboard":
-    render_header(APP_TITLE, "Pantau transaksi dalam visualisasi interaktif.")
-    df_filter = filter_data(df_semua)
-    if df_filter.empty:
-        st.warning("Tidak ada transaksi yang sesuai dengan filter.")
-    else:
-        tampilkan_kartu_ringkasan(df_filter)
-        st.write("")
-        section_header("Visualisasi Interaktif", "Grafik dapat di-hover, zoom, dan difilter lewat sidebar.")
-        tab_tren, tab_pengeluaran, tab_pemasukan = st.tabs(["Tren Keuangan", "Pengeluaran", "Pemasukan"])
-        with tab_tren:
-            grafik_bulanan(df_filter)
-            grafik_pengeluaran_harian(df_filter)
-            grafik_pengeluaran_harian_semua_bulan(df_filter)
-        with tab_pengeluaran:
-            col1, col2 = st.columns([1.15, 1])
-            with col1:
-                grafik_kategori(df_filter, "Pengeluaran")
-            with col2:
-                grafik_komposisi(df_filter, "Pengeluaran")
-        with tab_pemasukan:
-            col1, col2 = st.columns([1.15, 1])
-            with col1:
-                grafik_kategori(df_filter, "Pemasukan")
-            with col2:
-                grafik_komposisi(df_filter, "Pemasukan")
+    render_header(APP_TITLE, "Pantau seluruh transaksi dalam visualisasi interaktif.")
+    tampilkan_kartu_ringkasan(df_semua)
+    st.write("")
+    section_header("Visualisasi Interaktif", "Grafik dapat di-hover dan zoom untuk membaca pergerakan transaksi.")
+    tab_tren, tab_pengeluaran, tab_pemasukan = st.tabs(["Tren Keuangan", "Pengeluaran", "Pemasukan"])
+    with tab_tren:
+        grafik_bulanan(df_semua)
+        grafik_pengeluaran_harian(df_semua)
+        grafik_pengeluaran_harian_semua_bulan(df_semua)
+    with tab_pengeluaran:
+        col1, col2 = st.columns([1.15, 1])
+        with col1:
+            grafik_kategori(df_semua, "Pengeluaran")
+        with col2:
+            grafik_komposisi(df_semua, "Pengeluaran")
+    with tab_pemasukan:
+        col1, col2 = st.columns([1.15, 1])
+        with col1:
+            grafik_kategori(df_semua, "Pemasukan")
+        with col2:
+            grafik_komposisi(df_semua, "Pemasukan")
 
-        st.write("")
-        section_header("Rekap Bulanan", "Ringkasan pemasukan dan pengeluaran tiap bulan.")
-        rekap = rekap_bulanan(df_filter)
-        pesan_perubahan_bulanan(rekap)
-        st.dataframe(format_tabel_rekap(rekap), use_container_width=True, hide_index=True)
-        st.download_button(
-            "Unduh Rekap Bulanan",
-            data=rekap.to_csv(index=False).encode("utf-8-sig"),
-            file_name="rekap_keuangan_bulanan.csv",
-            mime="text/csv",
-            use_container_width=True,
-            on_click=mark_action_popup,
-            args=("Unduh dimulai", "Rekap bulanan sedang disiapkan.", "info"),
-        )
-
+    st.write("")
+    section_header("Rekap Bulanan", "Ringkasan pemasukan dan pengeluaran tiap bulan.")
+    rekap = rekap_bulanan(df_semua)
+    pesan_perubahan_bulanan(rekap)
+    st.dataframe(format_tabel_rekap(rekap), use_container_width=True, hide_index=True)
+    st.download_button(
+        "Unduh Rekap Bulanan",
+        data=rekap.to_csv(index=False).encode("utf-8-sig"),
+        file_name="rekap_keuangan_bulanan.csv",
+        mime="text/csv",
+        use_container_width=True,
+        on_click=mark_action_popup,
+        args=("Unduh dimulai", "Rekap bulanan sedang disiapkan.", "info"),
+    )
 elif menu == "Data Transaksi":
     render_header("Kelola Data", "Lihat daftar transaksi, lalu pilih aksi edit atau hapus dengan alur yang jelas.")
     if df_semua.empty:
