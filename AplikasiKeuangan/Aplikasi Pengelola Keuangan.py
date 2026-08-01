@@ -817,28 +817,58 @@ def grafik_pengeluaran_harian(df):
     fig.update_xaxes(tickformat="%d %b", rangeslider=dict(visible=True))
     show_plot(fig, 450)
 
-
 def grafik_pengeluaran_harian_semua_bulan(df):
     pengeluaran = df[df["jenis"] == "Pengeluaran"].copy()
     if pengeluaran.empty:
         return
+
     pengeluaran["Hari"] = pengeluaran["tanggal"].dt.day
     pengeluaran["Bulan"] = pengeluaran["tanggal"].dt.to_period("M").dt.to_timestamp()
     pengeluaran["Label Bulan"] = pengeluaran["Bulan"].map(lambda item: f"{NAMA_BULAN_PENDEK[item.month]} {item.year}")
+
+    bulan_opsi = sorted(pd.to_datetime(pengeluaran["Bulan"].dropna().unique()).tolist(), reverse=True)
+    if not bulan_opsi:
+        return
+
+    def label_bulan(item):
+        return f"{NAMA_BULAN[item.month]} {item.year}"
+
+    col_utama, col_pembanding = st.columns([1, 1.45])
+    with col_utama:
+        bulan_utama = st.selectbox(
+            "Bulan utama",
+            bulan_opsi,
+            format_func=label_bulan,
+            key="grafik_semua_bulan_utama",
+        )
+    opsi_pembanding = bulan_opsi
+    with col_pembanding:
+        bulan_pembanding = st.multiselect(
+            "Bandingkan dengan bulan lain",
+            opsi_pembanding,
+            default=opsi_pembanding[1:2],
+            format_func=label_bulan,
+            key="grafik_semua_bulan_pembanding",
+        )
+
+    bulan_terpilih = [bulan_utama] + [item for item in bulan_pembanding if item != bulan_utama]
+    pengeluaran = pengeluaran[pengeluaran["Bulan"].isin(bulan_terpilih)]
     data = (
         pengeluaran.groupby(["Bulan", "Label Bulan", "Hari"], as_index=False)["jumlah"]
         .sum()
         .sort_values(["Bulan", "Hari"])
         .rename(columns={"jumlah": "Pengeluaran"})
     )
+    urutan_bulan = [f"{NAMA_BULAN_PENDEK[item.month]} {item.year}" for item in bulan_terpilih]
     fig = px.line(
         data,
         x="Hari",
         y="Pengeluaran",
         color="Label Bulan",
         markers=True,
-        title="Pengeluaran Harian di Setiap Bulan",
+        title="Perbandingan Pengeluaran Harian per Bulan",
         labels={"Hari": "Tanggal", "Pengeluaran": "Pengeluaran", "Label Bulan": "Bulan"},
+        category_orders={"Label Bulan": urutan_bulan},
         color_discrete_sequence=WARNA_KATEGORI,
         custom_data=["Label Bulan"],
     )
@@ -850,7 +880,6 @@ def grafik_pengeluaran_harian_semua_bulan(df):
     fig.update_layout(hovermode="x unified", yaxis_tickprefix="Rp ", yaxis_tickformat=",.0f")
     fig.update_xaxes(dtick=1, range=[1, 31])
     show_plot(fig, 480)
-
 
 def rekap_bulanan(df):
     if df.empty:
