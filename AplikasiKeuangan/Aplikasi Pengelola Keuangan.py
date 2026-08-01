@@ -558,6 +558,33 @@ def delete_transaksi(spreadsheet_id, session, sheet_row):
     refresh_spreadsheet_cache()
 
 
+
+def delete_transaksi_batch(spreadsheet_id, session, sheet_rows):
+    sheet_id = get_sheet_id(spreadsheet_id, session)
+    rows = sorted({int(row) for row in sheet_rows}, reverse=True)
+    if not rows:
+        return
+
+    body = {
+        "requests": [
+            {
+                "deleteDimension": {
+                    "range": {
+                        "sheetId": sheet_id,
+                        "dimension": "ROWS",
+                        "startIndex": row - 1,
+                        "endIndex": row,
+                    }
+                }
+            }
+            for row in rows
+        ]
+    }
+    response = session.post(sheets_api_url(spreadsheet_id, ":batchUpdate"), json=body, timeout=20)
+    if not response.ok:
+        raise RuntimeError(f"Google Sheets API error {response.status_code}: {response.text}")
+    refresh_spreadsheet_cache()
+
 def mark_transaction_saved(transaction_id):
     st.session_state["last_saved_transaction_id"] = transaction_id
 
@@ -1266,57 +1293,70 @@ elif menu == "Data Transaksi":
                 """
                 <div class="action-panel">
                     <div class="action-panel-title">Hapus transaksi</div>
-                    <div class="action-panel-note">Pilih transaksi, cek preview, lalu lanjutkan ke konfirmasi hapus.</div>
+                    <div class="action-panel-note">Pilih satu atau beberapa transaksi, cek preview, lalu lanjutkan ke konfirmasi hapus.</div>
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
-            hapus_index = st.selectbox(
+            hapus_indices = st.multiselect(
                 "Pilih transaksi untuk dihapus",
                 range(len(pilihan_transaksi)),
                 format_func=lambda idx: pilihan_transaksi[idx],
-                key="delete_transaction_select",
+                key="delete_transaction_select_multi",
             )
-            delete_preview = df_semua.iloc[hapus_index]
-            st.warning(f"Transaksi terpilih: {delete_preview['id']} - {delete_preview['kategori']} - {rupiah(delete_preview['jumlah'])}")
-            if st.button("Lanjutkan Hapus", type="secondary", use_container_width=True):
-                st.session_state["delete_transaction_id"] = delete_preview["id"]
+            delete_preview = df_semua.iloc[list(hapus_indices)].copy() if hapus_indices else pd.DataFrame()
+            if delete_preview.empty:
+                st.info("Belum ada transaksi yang dipilih untuk dihapus.")
+            else:
+                total_hapus = delete_preview["jumlah"].sum()
+                st.warning(f"{len(delete_preview)} transaksi dipilih dengan total nominal {rupiah(total_hapus)}.")
+                preview_hapus = delete_preview[["id", "tanggal", "jenis", "kategori", "keterangan", "jumlah"]].copy()
+                preview_hapus["tanggal"] = preview_hapus["tanggal"].dt.strftime("%d-%m-%Y")
+                preview_hapus["jumlah"] = preview_hapus["jumlah"].map(rupiah)
+                st.dataframe(preview_hapus, use_container_width=True, hide_index=True)
+            if st.button("Lanjutkan Hapus", type="secondary", use_container_width=True, disabled=delete_preview.empty):
+                st.session_state["delete_transaction_ids"] = delete_preview["id"].tolist()
                 st.rerun()
 
-        if st.session_state.get("delete_transaction_id"):
-            delete_id = st.session_state["delete_transaction_id"]
-            delete_match = df_semua[df_semua["id"] == delete_id]
+        if st.session_state.get("delete_transaction_ids"):
+            delete_ids = st.session_state["delete_transaction_ids"]
+            delete_match = df_semua[df_semua["id"].isin(delete_ids)].copy()
             if delete_match.empty:
-                st.session_state.pop("delete_transaction_id", None)
+                st.session_state.pop("delete_transaction_ids", None)
                 render_action_popup("Hapus gagal", "Transaksi yang dipilih tidak ditemukan.", "warning")
             else:
-                delete_row = delete_match.iloc[0]
                 @st.dialog("Konfirmasi Hapus Transaksi")
                 def confirm_delete_dialog():
+                    total_hapus = delete_match["jumlah"].sum()
                     st.markdown(
                         f"""
                         <div class="action-panel">
-                            <div class="action-panel-title">{delete_row['id']}</div>
-                            <div class="action-panel-note">{delete_row['tanggal'].strftime('%d-%m-%Y')} - {delete_row['jenis']} - {delete_row['kategori']} - {rupiah(delete_row['jumlah'])}</div>
+                            <div class="action-panel-title">{len(delete_match)} transaksi akan dihapus</div>
+                            <div class="action-panel-note">Total nominal: {rupiah(total_hapus)}</div>
                         </div>
                         """,
                         unsafe_allow_html=True,
                     )
-                    st.warning("Data akan dihapus permanen.")
+                    preview_dialog = delete_match[["id", "tanggal", "jenis", "kategori", "keterangan", "jumlah"]].copy()
+                    preview_dialog["tanggal"] = preview_dialog["tanggal"].dt.strftime("%d-%m-%Y")
+                    preview_dialog["jumlah"] = preview_dialog["jumlah"].map(rupiah)
+                    st.dataframe(preview_dialog, use_container_width=True, hide_index=True)
+                    st.warning("Data yang dipilih akan dihapus permanen.")
                     col_hapus, col_batal = st.columns(2)
                     with col_hapus:
-                        if st.button("Ya, Hapus", type="primary", use_container_width=True):
+                        if st.button("Ya, Hapus Semua", type="primary", use_container_width=True):
                             try:
-                                delete_transaksi(spreadsheet_id, session, delete_row[SHEET_ROW_COLUMN])
-                                st.session_state.pop("delete_transaction_id", None)
-                                mark_action_popup("Hapus berhasil", f"Transaksi {delete_row['id']} berhasil dihapus.", "success")
+                                delete_transaksi_batch(spreadsheet_id, session, delete_match[SHEET_ROW_COLUMN].tolist())
+                                jumlah_dihapus = len(delete_match)
+                                st.session_state.pop("delete_transaction_ids", None)
+                                mark_action_popup("Hapus berhasil", f"{jumlah_dihapus} transaksi berhasil dihapus.", "success")
                                 st.rerun()
                             except Exception as exc:
                                 render_action_popup("Hapus gagal", "Transaksi belum terhapus. Periksa koneksi lalu coba lagi.", "danger")
                                 st.error(f"Gagal menghapus transaksi: {exc}")
                     with col_batal:
                         if st.button("Batal", use_container_width=True):
-                            st.session_state.pop("delete_transaction_id", None)
+                            st.session_state.pop("delete_transaction_ids", None)
                             mark_action_popup("Hapus dibatalkan", "Tidak ada data yang dihapus.", "info")
                             st.rerun()
                 confirm_delete_dialog()
