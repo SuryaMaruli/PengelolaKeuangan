@@ -414,7 +414,6 @@ def normalize_jenis(nilai):
         return "Pengeluaran"
     return str(nilai).strip()
 
-
 def normalize_tanggal(nilai):
     if pd.isna(nilai):
         return pd.NaT
@@ -427,8 +426,10 @@ def normalize_tanggal(nilai):
     if pd.notna(serial) and 20_000 <= serial <= 80_000:
         return pd.Timestamp("1899-12-30") + pd.to_timedelta(serial, unit="D")
 
-    return pd.to_datetime(text, errors="coerce", dayfirst=True)
+    if re.match(r"^\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}:\d{2})?$", text):
+        return pd.to_datetime(text, errors="coerce", yearfirst=True)
 
+    return pd.to_datetime(text, errors="coerce", dayfirst=True)
 
 def normalize_jumlah(nilai):
     text = str(nilai).strip()
