@@ -763,6 +763,23 @@ def grafik_komposisi(df, jenis):
     show_plot(fig)
 
 
+def pilih_data_bulanan_dashboard(df, jenis, key):
+    data_jenis = df[df["jenis"] == jenis].copy()
+    if data_jenis.empty:
+        return data_jenis
+
+    data_jenis["bulan_filter"] = data_jenis["tanggal"].dt.to_period("M")
+    bulan_opsi = sorted(data_jenis["bulan_filter"].dropna().unique(), reverse=True)
+    pilihan_bulan = st.selectbox(
+        f"Tampilkan data {jenis.lower()}",
+        ["Semua Bulan"] + bulan_opsi,
+        format_func=lambda item: item if isinstance(item, str) else f"{NAMA_BULAN[item.month]} {item.year}",
+        key=key,
+    )
+    if pilihan_bulan == "Semua Bulan":
+        return data_jenis.drop(columns=["bulan_filter"])
+    return data_jenis[data_jenis["bulan_filter"] == pilihan_bulan].drop(columns=["bulan_filter"])
+
 def grafik_pengeluaran_harian(df):
     pengeluaran = df[df["jenis"] == "Pengeluaran"].copy()
     if pengeluaran.empty:
@@ -1077,17 +1094,27 @@ elif menu == "Dashboard":
         grafik_pengeluaran_harian(df_semua)
         grafik_pengeluaran_harian_semua_bulan(df_semua)
     with tab_pengeluaran:
+        data_pengeluaran_dashboard = pilih_data_bulanan_dashboard(
+            df_semua,
+            "Pengeluaran",
+            "dashboard_bulan_pengeluaran",
+        )
         col1, col2 = st.columns([1.15, 1])
         with col1:
-            grafik_kategori(df_semua, "Pengeluaran")
+            grafik_kategori(data_pengeluaran_dashboard, "Pengeluaran")
         with col2:
-            grafik_komposisi(df_semua, "Pengeluaran")
+            grafik_komposisi(data_pengeluaran_dashboard, "Pengeluaran")
     with tab_pemasukan:
+        data_pemasukan_dashboard = pilih_data_bulanan_dashboard(
+            df_semua,
+            "Pemasukan",
+            "dashboard_bulan_pemasukan",
+        )
         col1, col2 = st.columns([1.15, 1])
         with col1:
-            grafik_kategori(df_semua, "Pemasukan")
+            grafik_kategori(data_pemasukan_dashboard, "Pemasukan")
         with col2:
-            grafik_komposisi(df_semua, "Pemasukan")
+            grafik_komposisi(data_pemasukan_dashboard, "Pemasukan")
 
     st.write("")
     section_header("Rekap Bulanan", "Ringkasan pemasukan dan pengeluaran tiap bulan.")
